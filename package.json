@@ -1,0 +1,21 @@
+{
+  "name": "thinhbeu-discord-bot",
+  "version": "3.0.0",
+  "description": "Discord Bot đầy đủ tính năng - Mod, Utility, Fun, Music, Economy, AI",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "node --watch index.js"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "discord.js": "^14.15.3",
+    "node-fetch": "^2.7.0",
+    "canvas": "^2.11.2",
+    "node-cron": "^3.0.3"
+  },
+  "keywords": ["discord", "bot", "groq", "ai", "moderation", "music", "economy"],
+  "license": "MIT"
+}
