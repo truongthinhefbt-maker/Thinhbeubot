@@ -1,136 +1,69 @@
-const { 
-  Client, 
-  GatewayIntentBits, 
-  PermissionsBitField, 
-  EmbedBuilder 
-} = require('discord.js');
+const { Client, GatewayIntentBits, REST, Routes, SlashCommandBuilder } = require('discord.js');
+const fetch = require('node-fetch');
 
 const client = new Client({
-  intents: [
-    GatewayIntentBits.Guilds,
-    GatewayIntentBits.GuildMessages,
-    GatewayIntentBits.MessageContent,
-    GatewayIntentBits.GuildMembers
-  ]
+  intents: [GatewayIntentBits.Guilds]
 });
 
-const prefix = "?";
+// ================= ĐĂNG KÝ COMMAND =================
+const commands = [
+  new SlashCommandBuilder().setName('menu').setDescription('Xem menu'),
+  new SlashCommandBuilder().setName('ask')
+    .setDescription('Hỏi AI')
+    .addStringOption(option =>
+      option.setName('cauhoi')
+        .setDescription('Nhập câu hỏi')
+        .setRequired(true)
+    ),
+  new SlashCommandBuilder().setName('weather')
+    .setDescription('Xem thời tiết')
+    .addStringOption(option =>
+      option.setName('city')
+        .setDescription('Tên thành phố')
+        .setRequired(true)
+    ),
+];
 
-client.on("ready", () => {
-  console.log(`Bot đã online: ${client.user.tag}`);
+client.once('ready', async () => {
+  console.log(`Bot online: ${client.user.tag}`);
+
+  const rest = new REST({ version: '10' }).setToken(process.env.TOKEN);
+
+  await rest.put(
+    Routes.applicationCommands(client.user.id),
+    { body: commands }
+  );
 });
 
-// ================= MESSAGE =================
-client.on("messageCreate", async (message) => {
-  if (message.author.bot) return;
-  if (!message.content.startsWith(prefix)) return;
+// ================= XỬ LÝ LỆNH =================
+client.on('interactionCreate', async interaction => {
+  if (!interaction.isChatInputCommand()) return;
 
-  const args = message.content.slice(prefix.length).trim().split(/ +/);
-  const command = args.shift().toLowerCase();
-
-  // ================= MENU =================
-  if (command === "menu") {
-    const embed = new EmbedBuilder()
-      .setTitle("🤖 MENU BOT")
-      .setColor("Blue")
-      .setDescription("Danh sách lệnh của bot")
-      .addFields(
-        { name: "⚙️ Quản lý", value: "`?kick @user`\n`?ban @user`\n`?rename @user tên`\n`?addrole @user @role`" },
-        { name: "🤖 AI", value: "`?ask câu hỏi`" },
-        { name: "📌 Khác", value: "`?help`" }
-      )
-      .setFooter({ text: "Bot by bạn 😎" });
-
-    return message.reply({ embeds: [embed] });
+  // ===== MENU =====
+  if (interaction.commandName === 'menu') {
+    return interaction.reply("📌 Lệnh: /ask /weather");
   }
 
-  // ================= HELP =================
-  if (command === "help") {
-    return message.reply("👉 Dùng `?menu` để xem đầy đủ lệnh");
+  // ===== AI =====
+  if (interaction.commandName === 'ask') {
+    const q = interaction.options.getString('cauhoi');
+
+    // Dùng API AI free (fake ChatGPT)
+    const res = await fetch(`https://api.affiliateplus.xyz/api/chatbot?message=${encodeURIComponent(q)}&botname=Bot&ownername=You`);
+    const data = await res.json();
+
+    return interaction.reply(`🤖 ${data.message}`);
   }
 
-  // ================= KICK =================
-  if (command === "kick") {
-    if (!message.member.permissions.has(PermissionsBitField.Flags.KickMembers))
-      return message.reply("❌ Không có quyền");
+  // ===== WEATHER =====
+  if (interaction.commandName === 'weather') {
+    const city = interaction.options.getString('city');
 
-    const user = message.mentions.members.first();
-    if (!user) return message.reply("❌ Tag người cần kick");
+    const res = await fetch(`https://wttr.in/${city}?format=3`);
+    const text = await res.text();
 
-    await user.kick();
-    message.reply(`✅ Đã kick ${user.user.tag}`);
+    return interaction.reply(`🌦️ ${text}`);
   }
-
-  // ================= BAN =================
-  if (command === "ban") {
-    if (!message.member.permissions.has(PermissionsBitField.Flags.BanMembers))
-      return message.reply("❌ Không có quyền");
-
-    const user = message.mentions.members.first();
-    if (!user) return message.reply("❌ Tag người cần ban");
-
-    await user.ban();
-    message.reply(`🚫 Đã ban ${user.user.tag}`);
-  }
-
-  // ================= RENAME =================
-  if (command === "rename") {
-    if (!message.member.permissions.has(PermissionsBitField.Flags.ManageNicknames))
-      return message.reply("❌ Không có quyền");
-
-    const user = message.mentions.members.first();
-    const newName = args.slice(1).join(" ");
-
-    if (!user || !newName)
-      return message.reply("❌ Dùng: ?rename @user tên");
-
-    await user.setNickname(newName);
-    message.reply(`✏️ Đã đổi tên thành ${newName}`);
-  }
-
-  // ================= ADD ROLE =================
-  if (command === "addrole") {
-    if (!message.member.permissions.has(PermissionsBitField.Flags.ManageRoles))
-      return message.reply("❌ Không có quyền");
-
-    const user = message.mentions.members.first();
-    const role = message.mentions.roles.first();
-
-    if (!user || !role)
-      return message.reply("❌ Dùng: ?addrole @user @role");
-
-    await user.roles.add(role);
-    message.reply(`✅ Đã thêm role cho ${user.user.tag}`);
-  }
-
-  // ================= AI (FAKE SMART) =================
-  if (command === "ask") {
-    const question = args.join(" ").toLowerCase();
-
-    if (!question) return message.reply("❌ Nhập câu hỏi");
-
-    let answer = "🤖 Tôi chưa hiểu câu hỏi này 😅";
-
-    if (question.includes("chào"))
-      answer = "👋 Chào bạn, mình là bot AI!";
-    else if (question.includes("bạn là ai"))
-      answer = "🤖 Tôi là bot AI do chủ server tạo ra!";
-    else if (question.includes("admin"))
-      answer = "👑 Admin là người quản lý server.";
-    else if (question.includes("server"))
-      answer = "🌐 Đây là server Discord của bạn.";
-
-    const embed = new EmbedBuilder()
-      .setTitle("🤖 AI Trả lời")
-      .setColor("Green")
-      .addFields(
-        { name: "❓ Câu hỏi", value: question },
-        { name: "💡 Trả lời", value: answer }
-      );
-
-    return message.reply({ embeds: [embed] });
-  }
-
 });
 
 client.login(process.env.TOKEN);
