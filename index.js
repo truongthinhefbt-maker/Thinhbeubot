@@ -23,6 +23,9 @@ const {
 const TOKEN       = process.env.TOKEN;
 const GROQ_KEY    = process.env.GROQ_API_KEY;
 const WEATHER_KEY = process.env.WEATHER_API_KEY;
+const LOG_CH      = process.env.LOG_CHANNEL_ID;
+const WELCOME_CH  = process.env.WELCOME_CHANNEL_ID;
+const AUTO_ROLE   = process.env.AUTO_ROLE_ID;
 const VERIFY_ROLE = process.env.VERIFY_ROLE_ID;
 
 if (!TOKEN) { console.error('❌ Thiếu TOKEN'); process.exit(1); }
@@ -273,7 +276,29 @@ client.once('ready', async () => {
   } catch (e) { console.error('❌ Lỗi đăng ký commands:', e); }
 });
 
+// ══════════════════════════════════════════════════════════════
+//  GUILD MEMBER ADD — Welcome + Auto-Role
+// ══════════════════════════════════════════════════════════════
+client.on('guildMemberAdd', async member => {
+  // Auto-role
+  if (AUTO_ROLE) {
+    const role = member.guild.roles.cache.get(AUTO_ROLE);
+    if (role) await member.roles.add(role).catch(() => {});
+  }
 
+  // Welcome message
+  if (WELCOME_CH) {
+    const ch = member.guild.channels.cache.get(WELCOME_CH);
+    if (!ch) return;
+    const embed = new EmbedBuilder()
+      .setTitle('👋 Thành viên mới!')
+      .setDescription(`Chào mừng **${member.user.tag}** đến với **${member.guild.name}**!\n\nBạn là thành viên thứ **${member.guild.memberCount}** 🎉`)
+      .setThumbnail(member.user.displayAvatarURL({ size: 256 }))
+      .setColor(0x57F287)
+      .setTimestamp();
+    ch.send({ content: `<@${member.id}>`, embeds: [embed] }).catch(() => {});
+  }
+});
 
 // ══════════════════════════════════════════════════════════════
 //  MESSAGE CREATE — XP, Anti-spam, Auto-mod, Custom cmds
@@ -342,7 +367,42 @@ client.on('messageCreate', async msg => {
   // (handled in messageUpdate)
 });
 
+// ── Log deleted messages ──
+client.on('messageDelete', async msg => {
+  if (!LOG_CH || msg.author?.bot) return;
+  const ch = msg.guild?.channels.cache.get(LOG_CH);
+  if (!ch) return;
+  ch.send({
+    embeds: [new EmbedBuilder()
+      .setColor(0xED4245)
+      .setTitle('🗑️ Tin nhắn bị xoá')
+      .addFields(
+        { name: '👤 Người dùng', value: msg.author?.tag ?? 'Không rõ', inline: true },
+        { name: '📢 Kênh', value: `${msg.channel}`, inline: true },
+        { name: '📝 Nội dung', value: msg.content || '*[không có nội dung]*' },
+      )
+      .setTimestamp()],
+  }).catch(() => {});
+});
 
+// ── Log edited messages ──
+client.on('messageUpdate', async (oldMsg, newMsg) => {
+  if (!LOG_CH || oldMsg.author?.bot || oldMsg.content === newMsg.content) return;
+  const ch = oldMsg.guild?.channels.cache.get(LOG_CH);
+  if (!ch) return;
+  ch.send({
+    embeds: [new EmbedBuilder()
+      .setColor(0xFEE75C)
+      .setTitle('✏️ Tin nhắn bị sửa')
+      .addFields(
+        { name: '👤 Người dùng', value: oldMsg.author?.tag ?? 'Không rõ', inline: true },
+        { name: '📢 Kênh', value: `${oldMsg.channel}`, inline: true },
+        { name: '📝 Trước', value: oldMsg.content?.slice(0, 1000) || '*trống*' },
+        { name: '✏️ Sau', value: newMsg.content?.slice(0, 1000) || '*trống*' },
+      )
+      .setTimestamp()],
+  }).catch(() => {});
+});
 
 // ══════════════════════════════════════════════════════════════
 //  INTERACTION HANDLER
@@ -368,172 +428,27 @@ client.on('interactionCreate', async interaction => {
     return;
   }
 
-  if (interaction.isStringSelectMenu()) return; // handled by collector inside /menu
-
   if (!interaction.isChatInputCommand()) return;
   const { commandName } = interaction;
 
   try {
     // ══════════════════ MENU ══════════════════
     if (commandName === 'menu') {
-      const menuPages = {
-        mod: new EmbedBuilder()
-          .setTitle('🛡️ Moderation — 13 lệnh')
-          .setColor(0xED4245)
-          .setThumbnail(client.user.displayAvatarURL())
-          .addFields(
-            { name: '🔨 /ban [@user] [lý do]', value: 'Cấm thành viên khỏi server', inline: true },
-            { name: '🔓 /unban [user ID]', value: 'Gỡ ban theo ID', inline: true },
-            { name: '👢 /kick [@user] [lý do]', value: 'Đuổi thành viên ra khỏi server', inline: true },
-            { name: '🔇 /mute [@user] [phút]', value: 'Timeout thành viên (tối đa 28 ngày)', inline: true },
-            { name: '🔊 /unmute [@user]', value: 'Gỡ timeout thành viên', inline: true },
-            { name: '⚠️ /warn [@user] [lý do]', value: 'Cảnh cáo — 3 lần tự động kick', inline: true },
-            { name: '📋 /warnings [@user]', value: 'Xem danh sách cảnh cáo', inline: true },
-            { name: '🗑️ /clearwarnings [@user]', value: 'Xoá tất cả cảnh cáo', inline: true },
-            { name: '🧹 /clear [số lượng]', value: 'Xoá hàng loạt tin nhắn (1–100)', inline: true },
-            { name: '🐢 /slowmode [giây]', value: 'Chỉnh độ trễ giữa các tin nhắn', inline: true },
-            { name: '🔒 /lock [kênh]', value: 'Khoá kênh không cho chat', inline: true },
-            { name: '🔓 /unlock [kênh]', value: 'Mở khoá kênh đã bị khoá', inline: true },
-            { name: '✏️ /nickname [@user] [tên]', value: 'Đổi biệt danh thành viên', inline: true },
-            { name: '⚙️ Auto-mod (tự động)', value: 'Chặn từ cấm • Chặn invite link • Anti-spam 30s timeout', inline: false },
-          )
-          .setFooter({ text: 'ThinhbeuBot v3.0 • Trang 1/6 — Moderation' })
-          .setTimestamp(),
-
-        util: new EmbedBuilder()
-          .setTitle('🔧 Utility — 10 lệnh')
-          .setColor(0x5865F2)
-          .setThumbnail(client.user.displayAvatarURL())
-          .addFields(
-            { name: '👤 /userinfo [@user]', value: 'Thông tin chi tiết thành viên (cảnh báo acc mới)', inline: true },
-            { name: '🏠 /serverinfo', value: 'Thông tin đầy đủ về server', inline: true },
-            { name: '🖼️ /avatar [@user]', value: 'Lấy link ảnh đại diện độ phân giải cao', inline: true },
-            { name: '🌦️ /weather [thành phố]', value: 'Xem thời tiết theo địa điểm', inline: true },
-            { name: '🌐 /translate [text] [ngôn ngữ]', value: 'Dịch văn bản (en/vi/ja/ko/zh/fr...)', inline: true },
-            { name: '⏰ /remind [thời gian] [nội dung]', value: 'Hẹn giờ nhắc nhở — gửi qua DM', inline: true },
-            { name: '📊 /poll [câu hỏi] [lựa chọn]', value: 'Tạo bình chọn với emoji reaction', inline: true },
-            { name: '🎁 /giveaway [thưởng] [thời gian]', value: 'Tổ chức giveaway bốc thăm tự động', inline: true },
-            { name: '🧮 /calc [biểu thức]', value: 'Máy tính ngay trong Discord', inline: true },
-            { name: '🏓 /ping', value: 'Kiểm tra độ trễ bot & API', inline: true },
-          )
-          .setFooter({ text: 'ThinhbeuBot v3.0 • Trang 2/6 — Utility' })
-          .setTimestamp(),
-
-        fun: new EmbedBuilder()
-          .setTitle('🎮 Fun & Games — 11 lệnh')
-          .setColor(0xFEE75C)
-          .setThumbnail(client.user.displayAvatarURL())
-          .addFields(
-            { name: '🎲 /roll [số mặt]', value: 'Tung xúc xắc (mặc định d6)', inline: true },
-            { name: '🪙 /flip', value: 'Tung đồng xu Sấp/Ngửa', inline: true },
-            { name: '🎱 /8ball [câu hỏi]', value: 'Bói toán trả lời Có/Không', inline: true },
-            { name: '😂 /joke', value: 'Kể chuyện cười ngẫu nhiên', inline: true },
-            { name: '😹 /meme', value: 'Ảnh chế ngẫu nhiên từ Reddit', inline: true },
-            { name: '💕 /lovecalc [@user1] [@user2]', value: 'Đo độ hợp nhau giữa 2 người', inline: true },
-            { name: '✊ /rps [búa/bao/kéo]', value: 'Kéo Búa Bao với bot', inline: true },
-            { name: '👋 /slap [@user]', value: 'Tát ai đó (kèm GIF)', inline: true },
-            { name: '🤗 /hug [@user]', value: 'Ôm ai đó (kèm GIF)', inline: true },
-            { name: '😘 /kiss [@user]', value: 'Hôn ai đó (kèm GIF)', inline: true },
-            { name: '🧠 /trivia', value: 'Câu hỏi đố vui — trả lời đúng nhận 50 xu!', inline: true },
-          )
-          .setFooter({ text: 'ThinhbeuBot v3.0 • Trang 3/6 — Fun & Games' })
-          .setTimestamp(),
-
-        music: new EmbedBuilder()
-          .setTitle('🎵 Music — 7 lệnh')
-          .setColor(0xFF0000)
-          .setThumbnail(client.user.displayAvatarURL())
-          .addFields(
-            { name: '▶️ /play [tên bài / link YouTube]', value: 'Tìm và thêm bài vào hàng đợi', inline: true },
-            { name: '⏭️ /skip', value: 'Bỏ qua bài đang phát', inline: true },
-            { name: '⏹️ /stop', value: 'Dừng nhạc & xoá toàn bộ hàng đợi', inline: true },
-            { name: '📜 /queue', value: 'Xem hàng đợi nhạc (10 bài đầu)', inline: true },
-            { name: '🎶 /nowplaying', value: 'Xem thông tin bài đang phát', inline: true },
-            { name: '🔁 /loop [off/song/queue]', value: 'Bật/tắt chế độ lặp bài hoặc queue', inline: true },
-            { name: '🔀 /shuffle', value: 'Xáo trộn hàng đợi ngẫu nhiên', inline: true },
-          )
-          .setFooter({ text: 'ThinhbeuBot v3.0 • Trang 4/6 — Music' })
-          .setTimestamp(),
-
-        eco: new EmbedBuilder()
-          .setTitle('💰 Economy & Leveling — 9 lệnh')
-          .setColor(0xFFD700)
-          .setThumbnail(client.user.displayAvatarURL())
-          .addFields(
-            { name: '💰 /daily', value: 'Nhận 100–500 xu mỗi ngày (hồi 24h)', inline: true },
-            { name: '💳 /balance [@user]', value: 'Xem số dư xu và cấp độ', inline: true },
-            { name: '💼 /work', value: 'Đi làm kiếm tiền (hồi 1 giờ)', inline: true },
-            { name: '🏅 /rank [@user]', value: 'Xem cấp độ và thanh tiến trình XP', inline: true },
-            { name: '🏆 /leaderboard [xu/cấp]', value: 'Bảng xếp hạng top 10 server', inline: true },
-            { name: '💸 /transfer [@user] [số xu]', value: 'Chuyển xu cho thành viên khác', inline: true },
-            { name: '🎲 /gamble [xu] [tài/xỉu]', value: 'Cá cược Tài Xỉu với 3 xúc xắc', inline: true },
-            { name: '🎰 /slots [xu]', value: 'Máy đánh bạc slot — jackpot x10!', inline: true },
-            { name: '🦐 /baucua [xu] [con vật]', value: 'Bầu Cua Tôm Cá truyền thống', inline: true },
-            { name: '⭐ Hệ thống XP tự động', value: 'Chat = nhận XP → tích đủ → Level Up tự động!', inline: false },
-          )
-          .setFooter({ text: 'ThinhbeuBot v3.0 • Trang 5/6 — Economy' })
-          .setTimestamp(),
-
-        ai: new EmbedBuilder()
-          .setTitle('🤖 AI & Hệ thống — 5 lệnh')
-          .setColor(0xF55036)
-          .setThumbnail(client.user.displayAvatarURL())
-          .addFields(
-            { name: '🤖 /ask [câu hỏi]', value: 'Hỏi Groq AI Llama 3.3 70B — miễn phí!', inline: true },
-            { name: '🎫 /ticket', value: 'Tạo kênh hỗ trợ riêng tư với admin', inline: true },
-            { name: '✅ /verify', value: 'Xác minh CAPTCHA để nhận role thành viên', inline: true },
-            { name: '⚙️ /addcmd [tên] [phản hồi]', value: 'Tạo lệnh !tên tuỳ chỉnh (admin)', inline: true },
-            { name: '📜 /listcmds', value: 'Xem tất cả lệnh tuỳ chỉnh của server', inline: true },
-            { name: '🏓 /ping', value: 'Kiểm tra độ trễ bot và Discord API', inline: true },
-          )
-          .setFooter({ text: 'ThinhbeuBot v3.0 • Trang 6/6 — AI & System' })
-          .setTimestamp(),
-      };
-
-      const selectMenu = new ActionRowBuilder().addComponents(
-        new StringSelectMenuBuilder()
-          .setCustomId('menu_select')
-          .setPlaceholder('📂 Chọn danh mục lệnh...')
-          .addOptions([
-            { label: 'Moderation', description: '13 lệnh quản trị server', value: 'mod', emoji: '🛡️' },
-            { label: 'Utility', description: '10 lệnh tiện ích hữu dụng', value: 'util', emoji: '🔧' },
-            { label: 'Fun & Games', description: '11 lệnh giải trí vui vẻ', value: 'fun', emoji: '🎮' },
-            { label: 'Music', description: '7 lệnh nghe nhạc YouTube', value: 'music', emoji: '🎵' },
-            { label: 'Economy & Leveling', description: '9 lệnh kinh tế và cấp độ', value: 'eco', emoji: '💰' },
-            { label: 'AI & Hệ thống', description: '5 lệnh AI và hệ thống', value: 'ai', emoji: '🤖' },
-          ])
-      );
-
-      const overviewEmbed = new EmbedBuilder()
-        .setTitle('📋 ThinhbeuBot v3.0 — Danh sách lệnh')
+      const embed = new EmbedBuilder()
+        .setTitle('📋 ThinhbeuBot — Danh sách lệnh')
         .setColor(0x5865F2)
         .setThumbnail(client.user.displayAvatarURL())
-        .setDescription('Chọn danh mục bên dưới để xem chi tiết từng lệnh ⬇️')
         .addFields(
-          { name: '🛡️ Moderation', value: '13 lệnh', inline: true },
-          { name: '🔧 Utility', value: '10 lệnh', inline: true },
-          { name: '🎮 Fun & Games', value: '11 lệnh', inline: true },
-          { name: '🎵 Music', value: '7 lệnh', inline: true },
-          { name: '💰 Economy', value: '9 lệnh', inline: true },
-          { name: '🤖 AI & System', value: '5 lệnh + /ping /menu', inline: true },
+          { name: '🛡️ Moderation', value: '`/ban` `/kick` `/mute` `/unmute` `/warn` `/warnings` `/clearwarnings` `/clear` `/slowmode` `/lock` `/unlock` `/unban` `/nickname`' },
+          { name: '🔧 Utility', value: '`/userinfo` `/serverinfo` `/avatar` `/weather` `/translate` `/remind` `/poll` `/giveaway` `/calc` `/ping`' },
+          { name: '🎮 Fun', value: '`/roll` `/flip` `/8ball` `/joke` `/meme` `/lovecalc` `/rps` `/slap` `/hug` `/kiss` `/trivia`' },
+          { name: '🎵 Music', value: '`/play` `/skip` `/stop` `/queue` `/nowplaying` `/loop` `/shuffle`' },
+          { name: '💰 Economy', value: '`/daily` `/balance` `/work` `/rank` `/leaderboard` `/transfer` `/gamble` `/slots` `/baucua`' },
+          { name: '🤖 AI & Hệ thống', value: '`/ask` `/ticket` `/verify` `/addcmd` `/listcmds` `/menu` `/ping`' },
         )
-        .setFooter({ text: 'ThinhbeuBot v3.0 • Tổng 55 lệnh' })
+        .setFooter({ text: 'ThinhbeuBot v3.0 — Full-Featured Discord Bot' })
         .setTimestamp();
-
-      const msg = await interaction.reply({ embeds: [overviewEmbed], components: [selectMenu], fetchReply: true });
-
-      const collector = msg.createMessageComponentCollector({ componentType: ComponentType.StringSelect, time: 120_000 });
-      collector.on('collect', async i => {
-        if (i.user.id !== interaction.user.id) {
-          return i.reply({ content: '❌ Chỉ người dùng lệnh mới được chọn!', ephemeral: true });
-        }
-        const page = menuPages[i.values[0]];
-        await i.update({ embeds: [page], components: [selectMenu] });
-      });
-      collector.on('end', () => {
-        interaction.editReply({ components: [] }).catch(() => {});
-      });
-      return;
+      return interaction.reply({ embeds: [embed] });
     }
 
     // ══════════════════ PING ══════════════════
@@ -1421,7 +1336,18 @@ function modEmbed(title, target, mod, reason, color) {
     ).setTimestamp();
 }
 
-function logAction() {} // no-op (log channel removed)
+async function logAction(guild, action, target, mod, reason) {
+  if (!LOG_CH) return;
+  const ch = guild.channels.cache.get(LOG_CH);
+  if (!ch) return;
+  ch.send({ embeds: [new EmbedBuilder().setColor(0xFEA82F)
+    .setTitle(`📋 ${action}`)
+    .addFields(
+      { name: '🎯 Thành viên', value: `${target.tag} (\`${target.id}\`)`, inline: true },
+      { name: '👮 Mod', value: mod.tag, inline: true },
+      { name: '📝 Lý do', value: reason || 'Không có lý do' },
+    ).setTimestamp()] }).catch(() => {});
+}
 
 function parseTime(str) {
   const match = str.match(/^(\d+)(s|m|h|d)$/i);
