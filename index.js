@@ -1117,7 +1117,6 @@ client.on('interactionCreate', async interaction => {
 
     if (commandName === 'leaderboard') {
       const type = interaction.options.getString('type') ?? 'coins';
-      const eco = require('./utils/db').getUser; // dummy for import
       const allData = (() => {
         const fs = require('fs'), path = require('path');
         const fp = path.join(__dirname, 'data', 'economy.json');
