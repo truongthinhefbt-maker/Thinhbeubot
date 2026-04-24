@@ -27,12 +27,18 @@ const commands = [
 client.once('ready', async () => {
   console.log(`Bot online: ${client.user.tag}`);
 
-  const rest = new REST({ version: '10' }).setToken(process.env.TOKEN);
+  const rest = new (require('discord.js').REST)({ version: '10' })
+    .setToken(process.env.TOKEN);
 
-  await rest.put(
-    Routes.applicationCommands(client.user.id),
-    { body: commands }
-  );
+  try {
+    await rest.put(
+      require('discord.js').Routes.applicationCommands(client.user.id),
+      { body: commands }
+    );
+    console.log("✅ Đã đăng ký lệnh /");
+  } catch (err) {
+    console.error(err);
+  }
 });
 
 // ================= XỬ LÝ LỆNH =================
