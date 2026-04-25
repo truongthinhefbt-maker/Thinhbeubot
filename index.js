@@ -11,6 +11,8 @@ const {
 const fetch = require('node-fetch');
 const fs = require('fs');
 const path = require('path');
+const dns = require('dns').promises;
+const net = require('net');
 
 // ══════════════════════════════════════════════════════════
 //  BIẾN MÔI TRƯỜNG
@@ -165,6 +167,95 @@ async function searchYouTube(query) {
 function randomFrom(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
 function truncate(text, max = 1000) { return text.length > max ? text.slice(0, max) + '...' : text; }
 
+function normalizeLookupTarget(input) {
+  const raw = `${input ?? ''}`.trim();
+  if (!raw) return '';
+  try {
+    const withProtocol = /^[a-z]+:\/\//i.test(raw) ? raw : `http://${raw}`;
+    return new URL(withProtocol).hostname || raw;
+  } catch {
+    return raw.replace(/^https?:\/\//i, '').split('/')[0].split('?')[0].split('#')[0];
+  }
+}
+
+async function resolveLookupIp(input) {
+  const target = normalizeLookupTarget(input);
+  if (!target) throw new Error('EMPTY_TARGET');
+  if (net.isIP(target)) return { query: target, ip: target, hostname: null };
+
+  try {
+    const result = await dns.lookup(target);
+    if (result?.address) return { query: target, ip: result.address, hostname: target };
+  } catch {}
+
+  try {
+    const res = await fetch(`https://dns.google/resolve?name=${encodeURIComponent(target)}&type=A`);
+    const data = await res.json();
+    const answer = data.Answer?.find(a => a.type === 1)?.data;
+    if (answer && net.isIP(answer)) return { query: target, ip: answer, hostname: target };
+  } catch {}
+
+  throw new Error('RESOLVE_FAILED');
+}
+
+async function lookupIpData(input) {
+  const resolved = await resolveLookupIp(input);
+  let lastError = null;
+
+  const providers = [
+    async () => {
+      const res = await fetch(`https://ipwho.is/${encodeURIComponent(resolved.ip)}`);
+      const data = await res.json();
+      if (!data.success) throw new Error(data.message || 'ipwho_failed');
+      return {
+        query: resolved.query,
+        ip: data.ip || resolved.ip,
+        hostname: resolved.hostname,
+        type: data.type || (net.isIP(resolved.ip) === 6 ? 'IPv6' : 'IPv4'),
+        city: data.city || 'Không rõ',
+        region: data.region || 'Không rõ',
+        country: data.country || 'Không rõ',
+        isp: data.connection?.isp || data.connection?.org || 'Không rõ',
+        org: data.connection?.org || 'Không rõ',
+        timezone: data.timezone?.id || 'Không rõ',
+        latitude: data.latitude,
+        longitude: data.longitude,
+        flag: data.flag?.emoji || '🌍',
+      };
+    },
+    async () => {
+      const res = await fetch(`https://ipapi.co/${encodeURIComponent(resolved.ip)}/json/`);
+      const data = await res.json();
+      if (data.error) throw new Error(data.reason || 'ipapi_failed');
+      return {
+        query: resolved.query,
+        ip: data.ip || resolved.ip,
+        hostname: resolved.hostname,
+        type: net.isIP(resolved.ip) === 6 ? 'IPv6' : 'IPv4',
+        city: data.city || 'Không rõ',
+        region: data.region || 'Không rõ',
+        country: data.country_name || 'Không rõ',
+        isp: data.org || 'Không rõ',
+        org: data.org || 'Không rõ',
+        timezone: data.timezone || 'Không rõ',
+        latitude: data.latitude,
+        longitude: data.longitude,
+        flag: '🌍',
+      };
+    },
+  ];
+
+  for (const provider of providers) {
+    try {
+      return await provider();
+    } catch (err) {
+      lastError = err;
+    }
+  }
+
+  throw lastError || new Error('LOOKUP_FAILED');
+}
+
 function stripVietnameseAccents(text) {
   return `${text ?? ''}`
     .normalize('NFD')
@@ -281,10 +372,10 @@ function buildXOEmbed(game) {
       : `🎯 Đến lượt <@${game.players[game.turn]}> (${game.turn}).`;
 
   return new EmbedBuilder()
-    .setTitle('❌ X O')
+    .setTitle('❌ X O Arena')
     .setColor(game.winner ? (game.winner === 'draw' ? COLORS.warning : COLORS.success) : COLORS.primary)
-    .setDescription(`❌ X: <@${game.players.X}>\n⭕ O: <@${game.players.O}>\n\n${status}`)
-    .setFooter({ text: 'Bấm nút để đánh cờ' })
+    .setDescription(`❌ Người chơi X: <@${game.players.X}>\n⭕ Người chơi O: <@${game.players.O}>\n\n${status}`)
+    .setFooter({ text: 'Bấm vào ô bên dưới để đánh cờ' })
     .setTimestamp();
 }
 
@@ -295,11 +386,18 @@ function getNoiTuLeader(scores) {
 
 function buildNoiTuEmbed(game, title = '🔗 Nối từ') {
   const target = getLastSyllable(game.currentWord);
-  return embed(
-    title,
-    `Từ hiện tại: **${game.currentWord}**\nTừ tiếp theo phải bắt đầu bằng: **${target}**\nTổng cụm từ hợp lệ: **${game.used.size}**\nNgười đang dẫn đầu: ${getNoiTuLeader(game.scores)}\n\nGửi đáp án bằng tin nhắn thường. Mỗi cụm nên có ít nhất 2 tiếng và không được lặp lại.`,
-    COLORS.info
-  );
+  return new EmbedBuilder()
+    .setTitle(title)
+    .setColor(COLORS.info)
+    .setDescription(
+      `🎯 Từ hiện tại: **${game.currentWord}**\n` +
+      `➡️ Từ tiếp theo phải bắt đầu bằng: **${target}**\n` +
+      `🔥 Tổng cụm đã nối: **${game.used.size}**\n` +
+      `👑 Người dẫn đầu: ${getNoiTuLeader(game.scores)}\n\n` +
+      'Gửi đáp án bằng tin nhắn thường. Cụm từ phải có ít nhất 2 tiếng và không được trùng.'
+    )
+    .setFooter({ text: 'Lệnh nhanh: /nt | Lệnh quản lý: /noitu' })
+    .setTimestamp();
 }
 
 function pickVuaTiengVietQuestion(difficulty) {
@@ -317,14 +415,19 @@ function maskVuaTiengVietAnswer(answer) {
 function buildVuaTiengVietEmbed(game, title = '👑 Vua tiếng Việt', reveal = false) {
   const timeLeft = Math.max(0, Math.ceil((game.endsAt - Date.now()) / 1000));
   const lines = [
-    `Chủ đề: **${game.category}**`,
-    `Độ khó: **${game.difficultyLabel}**`,
-    `Gợi ý: ${game.hint}`,
-    reveal ? `Đáp án: **${game.answer}**` : `Đáp án: **${game.maskedAnswer}**`,
+    `📚 Chủ đề: **${game.category}**`,
+    `🎚️ Độ khó: **${game.difficultyLabel}**`,
+    `💡 Gợi ý: ${game.hint}`,
+    reveal ? `✅ Đáp án: **${game.answer}**` : `🔤 Đáp án: **${game.maskedAnswer}**`,
   ];
-  if (!reveal) lines.push(`Thời gian còn lại: **${timeLeft}s**`);
+  if (!reveal) lines.push(`⏳ Thời gian còn lại: **${timeLeft}s**`);
   lines.push('', 'Trả lời bằng tin nhắn thường trong channel này.');
-  return embed(title, lines.join('\n'), reveal ? COLORS.success : COLORS.primary);
+  return new EmbedBuilder()
+    .setTitle(title)
+    .setDescription(lines.join('\n'))
+    .setColor(reveal ? COLORS.success : COLORS.primary)
+    .setFooter({ text: 'Lệnh nhanh: /vtv | Lệnh quản lý: /vuatiengviet' })
+    .setTimestamp();
 }
 
 async function handleNoiTuMessage(message) {
@@ -439,6 +542,8 @@ const commands = [
     .addStringOption(o => o.setName('expr').setDescription('Biểu thức').setRequired(true)),
   new SlashCommandBuilder().setName('ipinfo').setDescription('🌐 Tra IP')
     .addStringOption(o => o.setName('ip').setDescription('IP/domain').setRequired(true)),
+  new SlashCommandBuilder().setName('ip').setDescription('🌍 Tra nhanh IP hoặc domain')
+    .addStringOption(o => o.setName('ip').setDescription('IP/domain').setRequired(true)),
   new SlashCommandBuilder().setName('botstats').setDescription('📊 Thống kê bot'),
   new SlashCommandBuilder().setName('currency').setDescription('💱 Tỷ giá')
     .addStringOption(o => o.setName('from').setDescription('Từ').setRequired(true))
@@ -547,6 +652,8 @@ const commands = [
   // ── GAME (3 lệnh) ──
   new SlashCommandBuilder().setName('xo').setDescription('❌ Chơi X O với bạn bè')
     .addUserOption(o => o.setName('user').setDescription('Người chơi cùng').setRequired(true)),
+  new SlashCommandBuilder().setName('nt').setDescription('🔗 Nối từ nhanh')
+    .addStringOption(o => o.setName('word').setDescription('Từ bắt đầu (ít nhất 2 tiếng)').setRequired(false)),
   new SlashCommandBuilder().setName('noitu').setDescription('🔗 Quản lý trò chơi nối từ')
     .addStringOption(o => o.setName('action').setDescription('Hành động').setRequired(true)
       .addChoices(
@@ -555,6 +662,13 @@ const commands = [
         { name: 'Dừng game', value: 'stop' }
       ))
     .addStringOption(o => o.setName('word').setDescription('Từ bắt đầu (ít nhất 2 tiếng)').setRequired(false)),
+  new SlashCommandBuilder().setName('vtv').setDescription('👑 Vua tiếng Việt nhanh')
+    .addStringOption(o => o.setName('difficulty').setDescription('Độ khó').setRequired(false)
+      .addChoices(
+        { name: 'Dễ', value: 'easy' },
+        { name: 'Trung bình', value: 'medium' },
+        { name: 'Khó', value: 'hard' }
+      )),
   new SlashCommandBuilder().setName('vuatiengviet').setDescription('👑 Quản lý trò chơi Vua tiếng Việt')
     .addStringOption(o => o.setName('action').setDescription('Hành động').setRequired(true)
       .addChoices(
@@ -675,21 +789,22 @@ client.on('interactionCreate', async interaction => {
     // ════════════════════════════════════════════════════════
     if (cmd === 'menu' || cmd === 'help') {
       const e = new EmbedBuilder()
-        .setTitle('📋 Danh sách lệnh')
+        .setTitle('📋 Trung Tâm Lệnh')
         .setColor(COLORS.primary)
         .setThumbnail(client.user.displayAvatarURL())
+        .setDescription('Chọn nhóm lệnh bên dưới. Các game nhanh nên dùng `/xo`, `/nt`, `/vtv` và tra IP nhanh bằng `/ip`.')
         .addFields(
           { name: '🤖 AI (11)', value: '`/ask` `/translate` `/summarize` `/grammar` `/explain` `/story` `/idea` `/quiz` `/define` `/roast` `/compliment`' },
-          { name: 'ℹ️ Info (10)', value: '`/ping` `/userinfo` `/serverinfo` `/avatar` `/weather` `/crypto` `/calc` `/ipinfo` `/botstats` `/currency`' },
+          { name: 'ℹ️ Info (11)', value: '`/ping` `/userinfo` `/serverinfo` `/avatar` `/weather` `/crypto` `/calc` `/ipinfo` `/ip` `/botstats` `/currency`' },
           { name: '🛡️ Mod (17)', value: '`/kick` `/ban` `/unban` `/mute` `/unmute` `/warn` `/warns` `/clearwarns` `/purge` `/purgebot` `/purgelinks` `/purgeimages` `/purgeword` `/slowmode` `/lock` `/unlock` `/nickname`' },
           { name: '🗑️ Xóa Chat', value: '`/purge` — theo user\n`/purgebot` — xóa tin bot\n`/purgelinks` — xóa tin chứa link\n`/purgeimages` — xóa tin chứa ảnh/file\n`/purgeword` — xóa theo từ khóa' },
           { name: '🎵 Music (7)', value: '`/play` `/skip` `/stop` `/queue` `/nowplaying` `/loop` `/shuffle`' },
           { name: '🎮 Fun (15)', value: '`/coinflip` `/roll` `/8ball` `/joke` `/meme` `/lovecalc` `/rps` `/slap` `/hug` `/kiss` `/pat` `/trivia` `/dadjoke` `/quote` `/fact`' },
-          { name: '🕹️ Game (3)', value: '`/xo` `/noitu` `/vuatiengviet`' },
+          { name: '🕹️ Game (5)', value: '`/xo` `/nt` `/vtv` `/noitu` `/vuatiengviet`' },
           { name: '🔧 Utility (12)', value: '`/poll` `/remind` `/afk` `/timer` `/say` `/embed` `/announce` `/choose` `/reverse` `/base64` `/qrcode` `/shorturl`' },
           { name: '📊 Level/XP (5)', value: '`/rank` `/leaderboard` `/checkin` `/profile` `/badges`' }
         )
-        .setFooter({ text: `Tổng ${commands.length} lệnh | Powered by Groq AI` })
+        .setFooter({ text: `Tổng ${commands.length} lệnh | Game nhanh và tra IP đã được rút gọn` })
         .setTimestamp();
       return interaction.reply({ embeds: [e] });
     }
@@ -872,15 +987,42 @@ client.on('interactionCreate', async interaction => {
       } catch { return interaction.reply({ embeds: [errorEmbed('Lỗi', `Biểu thức không hợp lệ: \`${expr}\``)] }); }
     }
 
-    if (cmd === 'ipinfo') {
+    if (cmd === 'ipinfo' || cmd === 'ip') {
       await interaction.deferReply();
-      const ip = interaction.options.getString('ip');
+      const input = interaction.options.getString('ip');
       try {
-        const res = await fetch(`https://ipapi.co/${ip}/json/`);
-        const d = await res.json();
-        if (d.error) return interaction.editReply({ embeds: [errorEmbed('Lỗi', 'IP không hợp lệ!')] });
-        return interaction.editReply({ embeds: [embed(`🌐 IP: ${ip}`, `📍 ${d.city}, ${d.country_name}\n📡 ISP: ${d.org}\n🕐 ${d.timezone}`, COLORS.info)] });
-      } catch { return interaction.editReply({ embeds: [errorEmbed('Lỗi', 'Không tra được IP!')] }); }
+        const data = await lookupIpData(input);
+        const location = [data.city, data.region, data.country].filter(Boolean).join(', ');
+        const coordinates = (data.latitude != null && data.longitude != null)
+          ? `${data.latitude}, ${data.longitude}`
+          : 'Không rõ';
+
+        const e = new EmbedBuilder()
+          .setTitle(`${data.flag} Tra Cứu IP / Domain`)
+          .setColor(COLORS.info)
+          .setDescription(`🔎 Đầu vào: \`${data.query}\`\n🧭 IP thực: \`${data.ip}\`${data.hostname ? `\n🌐 Domain: \`${data.hostname}\`` : ''}`)
+          .addFields(
+            { name: '📍 Vị trí', value: location || 'Không rõ' },
+            { name: '📡 ISP', value: data.isp || 'Không rõ', inline: true },
+            { name: '🧬 Tổ chức', value: data.org || 'Không rõ', inline: true },
+            { name: '🛰️ Loại', value: data.type || 'Không rõ', inline: true },
+            { name: '🕐 Múi giờ', value: data.timezone || 'Không rõ', inline: true },
+            { name: '🗺️ Tọa độ', value: coordinates, inline: true }
+          )
+          .setFooter({ text: 'Hỗ trợ cả IP, domain và URL' })
+          .setTimestamp();
+
+        return interaction.editReply({ embeds: [e] });
+      } catch {
+        return interaction.editReply({
+          embeds: [
+            errorEmbed(
+              'Không tra được IP',
+              'Hãy nhập IP hoặc domain hợp lệ.\nVí dụ: `8.8.8.8`, `1.1.1.1`, `google.com`, `https://openai.com`'
+            )
+          ]
+        });
+      }
     }
 
     if (cmd === 'botstats') {
@@ -1417,8 +1559,8 @@ client.on('interactionCreate', async interaction => {
       return;
     }
 
-    if (cmd === 'noitu') {
-      const action = interaction.options.getString('action');
+    if (cmd === 'noitu' || cmd === 'nt') {
+      const action = cmd === 'nt' ? 'start' : interaction.options.getString('action');
 
       if (action === 'start') {
         if (noiTuGames.has(interaction.channelId)) {
@@ -1467,8 +1609,8 @@ client.on('interactionCreate', async interaction => {
       return interaction.reply({ embeds: [summary] });
     }
 
-    if (cmd === 'vuatiengviet') {
-      const action = interaction.options.getString('action');
+    if (cmd === 'vuatiengviet' || cmd === 'vtv') {
+      const action = cmd === 'vtv' ? 'start' : interaction.options.getString('action');
 
       if (action === 'start') {
         if (vuaTiengVietGames.has(interaction.channelId)) {
