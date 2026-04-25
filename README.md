@@ -1,4 +1,4 @@
-# 🤖 ThinhbeuBot — Discord Bot Full-Featured v3.0
+# 🤖 ThinhbeuBot — Discord Bot Full-Featured v4.1
 
 Bot Discord đầy đủ tính năng: Moderation, Utility, Fun, Music, Economy, AI — deploy sẵn cho Railway.
 
