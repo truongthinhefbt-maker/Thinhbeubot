@@ -952,28 +952,44 @@ client.on('interactionCreate', async interaction => {
     //  FUN COMMANDS
     // ════════════════════════════════════════════════════════
     if (cmd === 'coinflip') {
-      const result = randomFrom(['Ngửa', 'Sấp']);
-      return interaction.reply({ embeds: [embed('🪙 Tung đồng xu', `Kết quả: **${result}**`, COLORS.primary)] });
+      const result = randomFrom(['🌕 Mặt Ngửa', '🌑 Mặt Sấp']);
+      const win = result.includes('Ngửa');
+      return interaction.reply({ embeds: [embed('🪙 Tung đồng xu', `Kết quả: **${result}**`, win ? COLORS.success : COLORS.warning)] });
     }
 
     if (cmd === 'roll') {
       const sides = interaction.options.getInteger('sides') ?? 6;
       const result = Math.floor(Math.random() * sides) + 1;
-      return interaction.reply({ embeds: [embed(`🎲 Tung xúc xắc ${sides} mặt`, `Kết quả: **${result}**`, COLORS.primary)] });
+      const isMax = result === sides;
+      return interaction.reply({ embeds: [embed(`🎲 Tung xúc xắc ${sides} mặt`, `Kết quả: **${result}**${isMax ? ' 🎉 Điểm tối đa!' : ''}`, isMax ? COLORS.success : COLORS.primary)] });
     }
 
     if (cmd === '8ball') {
       const q = interaction.options.getString('question');
-      const answers = ['Chắc chắn rồi!', 'Có thể đấy', 'Không chắc lắm', 'Đừng mơ!', 'Không đâu', 'Hỏi lại sau đi', 'Tất nhiên là có!', 'Không bao giờ!'];
+      const answers = [
+        'Chắc chắn rồi! 🎯',
+        'Có thể lắm đó! 😊',
+        'Theo dự đoán của tôi là CÓ! ✅',
+        'Khả năng rất cao! 📈',
+        'Không nghi ngờ gì nữa! 💯',
+        'Nhìn không khả quan lắm... 😬',
+        'Câu trả lời rất mờ nhạt, hỏi lại sau đi! 🌫️',
+        'Tốt hơn là đừng nên kỳ vọng! 😅',
+        'Không có gì chắc chắn cả! 🤷',
+        'Câu trả lời là KHÔNG! ❌',
+        'Đừng mơ nhé bạn ơi! 😂',
+        'Tuyệt đối không! 🚫',
+        'Hỏi tôi sau khi bạn cúng ông địa đã! 🕯️',
+        'Vũ trụ nói rằng... Có lẽ không! 🌌',
+        'Bạn biết câu trả lời rồi đấy, cần tôi xác nhận không? 😏',
+      ];
       return interaction.reply({ embeds: [embed('🔮 Quả cầu thần', `**❓ ${q}**\n\n**💬 ${randomFrom(answers)}**`, COLORS.primary)] });
     }
 
     if (cmd === 'joke') {
       await interaction.deferReply();
       try {
-        const res = await fetch('https://v2.jokeapi.dev/joke/Any?lang=en');
-        const data = await res.json();
-        const joke = data.type === 'single' ? data.joke : `${data.setup}\n\n||${data.delivery}||`;
+        const joke = await askGroq('Kể một câu chuyện cười ngắn bằng tiếng Việt, hài hước và vui nhộn. Chỉ kể chuyện cười thôi, không giải thích gì thêm.', null, 300);
         return interaction.editReply({ embeds: [embed('😂 Chuyện cười', joke, COLORS.warning)] });
       } catch { return interaction.editReply({ embeds: [errorEmbed('Lỗi', 'Không lấy được joke!')] }); }
     }
@@ -981,9 +997,11 @@ client.on('interactionCreate', async interaction => {
     if (cmd === 'meme') {
       await interaction.deferReply();
       try {
-        const res = await fetch('https://meme-api.com/gimme');
-        const data = await res.json();
-        return interaction.editReply({ embeds: [embed(data.title, `👍 ${data.ups} upvotes`, COLORS.primary).setImage(data.url).setFooter({ text: `r/${data.subreddit}` })] });
+        const result = await askGroq(
+          'Tạo một meme text hài hước bằng tiếng Việt theo format:\n🖼️ **[Tên meme/tình huống]**\n\n*Trên:* [chữ trên ảnh]\n*Dưới:* [chữ dưới ảnh]\n\n[Giải thích ngắn tại sao buồn cười]',
+          null, 300
+        );
+        return interaction.editReply({ embeds: [embed('😂 Meme hôm nay', result, COLORS.primary)] });
       } catch { return interaction.editReply({ embeds: [errorEmbed('Lỗi', 'Không lấy được meme!')] }); }
     }
 
@@ -992,76 +1010,109 @@ client.on('interactionCreate', async interaction => {
       const u2 = interaction.options.getUser('user2');
       const percent = Math.floor(Math.random() * 101);
       const hearts = '❤️'.repeat(Math.floor(percent / 10)) + '🤍'.repeat(10 - Math.floor(percent / 10));
-      return interaction.reply({ embeds: [embed('💕 Đo độ hợp', `${u1.username} x ${u2.username}\n\n${hearts}\n**${percent}%** hợp nhau!`, COLORS.primary)] });
+      let comment;
+      if (percent >= 90) comment = '💞 Trời sinh một cặp! Cưới thôi!';
+      else if (percent >= 70) comment = '😍 Rất hợp nhau, tương lai xán lạn!';
+      else if (percent >= 50) comment = '😊 Khá hợp, cần thêm thời gian tìm hiểu!';
+      else if (percent >= 30) comment = '🤔 Hơi khó, nhưng tình yêu vượt qua tất cả!';
+      else comment = '😬 Ôi trời... Có lẽ chỉ là bạn thôi nhỉ?';
+      return interaction.reply({ embeds: [embed('💕 Đo độ hợp', `💑 **${u1.username}** × **${u2.username}**\n\n${hearts}\n\n**${percent}%** hợp nhau!\n${comment}`, COLORS.primary)] });
     }
 
     if (cmd === 'rps') {
       const choice = interaction.options.getString('choice');
       const choices = ['rock', 'paper', 'scissors'];
       const botChoice = randomFrom(choices);
-      const emojis = { rock: '✊', paper: '✋', scissors: '✌️' };
-      let result;
-      if (choice === botChoice) result = '🤝 Hòa!';
-      else if ((choice === 'rock' && botChoice === 'scissors') || (choice === 'paper' && botChoice === 'rock') || (choice === 'scissors' && botChoice === 'paper')) result = '🎉 Bạn thắng!';
-      else result = '😢 Bạn thua!';
-      return interaction.reply({ embeds: [embed('✊ Kéo Búa Bao', `Bạn: ${emojis[choice]}\nBot: ${emojis[botChoice]}\n\n**${result}**`, COLORS.primary)] });
+      const emojis = { rock: '✊ Búa', paper: '✋ Bao', scissors: '✌️ Kéo' };
+      let result, color;
+      if (choice === botChoice) { result = '🤝 Hòa! Thử lại nào!'; color = COLORS.warning; }
+      else if (
+        (choice === 'rock' && botChoice === 'scissors') ||
+        (choice === 'paper' && botChoice === 'rock') ||
+        (choice === 'scissors' && botChoice === 'paper')
+      ) { result = '🎉 Bạn thắng! Giỏi quá!'; color = COLORS.success; }
+      else { result = '😢 Bạn thua rồi! Chơi lại không?'; color = COLORS.danger; }
+      return interaction.reply({ embeds: [embed('✊ Kéo Búa Bao', `👤 Bạn: **${emojis[choice]}**\n🤖 Bot: **${emojis[botChoice]}**\n\n**${result}**`, color)] });
     }
 
     if (cmd === 'slap') {
       const target = interaction.options.getUser('user');
-      return interaction.reply({ embeds: [embed('👋 Slap', `${interaction.user.username} đã tát ${target.username}! 👋💥`, COLORS.danger)] });
+      const msgs = [
+        `${interaction.user.username} tát **${target.username}** một cái đau điếng! 👋💥`,
+        `**${target.username}** vừa ăn một cái tát trời giáng từ ${interaction.user.username}! 😵`,
+        `${interaction.user.username} vả **${target.username}** không trượt phát nào! 🤌👋`,
+      ];
+      return interaction.reply({ embeds: [embed('👋 Tát!', randomFrom(msgs), COLORS.danger)] });
     }
 
     if (cmd === 'hug') {
       const target = interaction.options.getUser('user');
-      return interaction.reply({ embeds: [embed('🤗 Hug', `${interaction.user.username} đã ôm ${target.username}! 🤗💕`, COLORS.success)] });
+      const msgs = [
+        `${interaction.user.username} ôm **${target.username}** thật chặt! 🤗💕`,
+        `**${target.username}** được ${interaction.user.username} ôm ấm áp quá! 🥰`,
+        `${interaction.user.username} và **${target.username}** ôm nhau, cảnh tượng thật dễ thương! 🤗✨`,
+      ];
+      return interaction.reply({ embeds: [embed('🤗 Ôm!', randomFrom(msgs), COLORS.success)] });
     }
 
     if (cmd === 'kiss') {
       const target = interaction.options.getUser('user');
-      return interaction.reply({ embeds: [embed('😘 Kiss', `${interaction.user.username} đã hôn ${target.username}! 😘💋`, COLORS.primary)] });
+      const msgs = [
+        `${interaction.user.username} hôn **${target.username}** nhẹ lên má! 😘💋`,
+        `**${target.username}** đỏ mặt vì bị ${interaction.user.username} hôn bất ngờ! 😳💋`,
+        `${interaction.user.username} gửi nụ hôn đến **${target.username}**! 😘❤️`,
+      ];
+      return interaction.reply({ embeds: [embed('😘 Hôn!', randomFrom(msgs), COLORS.primary)] });
     }
 
     if (cmd === 'pat') {
       const target = interaction.options.getUser('user');
-      return interaction.reply({ embeds: [embed('🫳 Pat', `${interaction.user.username} đã vỗ đầu ${target.username}! 🫳✨`, COLORS.info)] });
+      const msgs = [
+        `${interaction.user.username} vỗ đầu **${target.username}** nhẹ nhàng! 🫳✨`,
+        `**${target.username}** được ${interaction.user.username} xoa đầu khen ngoan! 🥹`,
+        `${interaction.user.username} vỗ đầu **${target.username}**: "Ngoan lắm!" 🫳😄`,
+      ];
+      return interaction.reply({ embeds: [embed('🫳 Vỗ đầu!', randomFrom(msgs), COLORS.info)] });
     }
 
     if (cmd === 'trivia') {
       await interaction.deferReply();
       try {
-        const res = await fetch('https://opentdb.com/api.php?amount=1&type=multiple');
-        const data = await res.json();
-        const q = data.results[0];
-        const answers = [...q.incorrect_answers, q.correct_answer].sort(() => Math.random() - 0.5);
-        return interaction.editReply({ embeds: [embed('🧠 Trivia', `**${q.question}**\n\nA) ${answers[0]}\nB) ${answers[1]}\nC) ${answers[2]}\nD) ${answers[3]}\n\n||Đáp án: ${q.correct_answer}||`, COLORS.primary)] });
+        const result = await askGroq(
+          'Tạo 1 câu hỏi trắc nghiệm vui bằng tiếng Việt với 4 đáp án A/B/C/D. Format bắt buộc:\n❓ [câu hỏi]\n\nA) [đáp án]\nB) [đáp án]\nC) [đáp án]\nD) [đáp án]\n\n||✅ Đáp án đúng: [chữ cái]||',
+          null, 400
+        );
+        return interaction.editReply({ embeds: [embed('🧠 Câu đố vui', result, COLORS.primary)] });
       } catch { return interaction.editReply({ embeds: [errorEmbed('Lỗi', 'Không lấy được câu hỏi!')] }); }
     }
 
     if (cmd === 'dadjoke') {
       await interaction.deferReply();
       try {
-        const res = await fetch('https://icanhazdadjoke.com/', { headers: { 'Accept': 'application/json' } });
-        const data = await res.json();
-        return interaction.editReply({ embeds: [embed('👨 Dad Joke', data.joke, COLORS.warning)] });
+        const joke = await askGroq('Kể một câu "dad joke" kiểu chơi chữ hài hước bằng tiếng Việt, theo phong cách bố kể chuyện cười nhạt mà tự cười. Chỉ kể joke thôi.', null, 200);
+        return interaction.editReply({ embeds: [embed('👨 Dad Joke', joke, COLORS.warning)] });
       } catch { return interaction.editReply({ embeds: [errorEmbed('Lỗi', 'Không lấy được joke!')] }); }
     }
 
     if (cmd === 'quote') {
       await interaction.deferReply();
       try {
-        const res = await fetch('https://api.quotable.io/random');
-        const data = await res.json();
-        return interaction.editReply({ embeds: [embed(`💬 Quote — ${data.author}`, `"${data.content}"`, COLORS.info)] });
+        const result = await askGroq(
+          'Tạo một câu danh ngôn hoặc triết lý sống hay bằng tiếng Việt. Format:\n"[câu danh ngôn]"\n— [Tác giả hoặc "Khuyết danh"]',
+          null, 200
+        );
+        return interaction.editReply({ embeds: [embed('💬 Danh ngôn', result, COLORS.info)] });
       } catch { return interaction.editReply({ embeds: [errorEmbed('Lỗi', 'Không lấy được quote!')] }); }
     }
 
     if (cmd === 'fact') {
       await interaction.deferReply();
       try {
-        const res = await fetch('https://uselessfacts.jsph.pl/random.json?language=en');
-        const data = await res.json();
-        return interaction.editReply({ embeds: [embed('💡 Sự thật thú vị', data.text, COLORS.primary)] });
+        const result = await askGroq(
+          'Chia sẻ một sự thật thú vị, kỳ lạ hoặc ít người biết bằng tiếng Việt. Phải là thông tin thật, thú vị và ngắn gọn (2-4 câu). Bắt đầu bằng "💡 Bạn có biết..."',
+          null, 300
+        );
+        return interaction.editReply({ embeds: [embed('💡 Sự thật thú vị', result, COLORS.primary)] });
       } catch { return interaction.editReply({ embeds: [errorEmbed('Lỗi', 'Không lấy được fact!')] }); }
     }
 
