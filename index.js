@@ -5,7 +5,8 @@
 
 const {
   Client, GatewayIntentBits, REST, Routes, SlashCommandBuilder,
-  EmbedBuilder, PermissionFlagsBits, ActivityType, Collection
+  EmbedBuilder, PermissionFlagsBits, ActivityType, Collection,
+  ActionRowBuilder, ButtonBuilder, ButtonStyle
 } = require('discord.js');
 const fetch = require('node-fetch');
 const fs = require('fs');
@@ -163,6 +164,218 @@ async function searchYouTube(query) {
 
 function randomFrom(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
 function truncate(text, max = 1000) { return text.length > max ? text.slice(0, max) + '...' : text; }
+
+function stripVietnameseAccents(text) {
+  return `${text ?? ''}`
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/đ/g, 'd')
+    .replace(/Đ/g, 'D');
+}
+
+function normalizeGameText(text) {
+  return `${text ?? ''}`
+    .normalize('NFC')
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function normalizeAnswerText(text) {
+  return stripVietnameseAccents(normalizeGameText(text)).toLowerCase().trim();
+}
+
+function getSyllables(text) {
+  return normalizeGameText(text).split(' ').filter(Boolean);
+}
+
+function isCompoundWord(text) {
+  return getSyllables(text).length >= 2;
+}
+
+function getFirstSyllable(text) {
+  return getSyllables(text)[0] ?? '';
+}
+
+function getLastSyllable(text) {
+  const syllables = getSyllables(text);
+  return syllables[syllables.length - 1] ?? '';
+}
+
+function canManageChannelGame(interaction, hostId) {
+  return interaction.user.id === hostId || interaction.memberPermissions?.has(PermissionFlagsBits.ManageMessages);
+}
+
+const xoGames = new Map(); // channelId -> { players, board, turn, winner, createdAt, messageId }
+const noiTuGames = new Map(); // channelId -> { currentWord, used, scores, hostId }
+const vuaTiengVietGames = new Map(); // channelId -> { answer, hint, category, timeout, endsAt, hostId }
+
+const XO_WIN_LINES = [
+  [0, 1, 2], [3, 4, 5], [6, 7, 8],
+  [0, 3, 6], [1, 4, 7], [2, 5, 8],
+  [0, 4, 8], [2, 4, 6],
+];
+
+const NOI_TU_WORD_BANK = [
+  'học sinh', 'sinh viên', 'viên ngọc', 'ngọc trai', 'trai đẹp',
+  'đẹp đôi', 'đôi mắt', 'mắt kính', 'kính mời', 'mời bạn',
+  'bạn bè', 'bè bạn', 'bầu trời', 'trời xanh', 'xanh lá',
+  'lá thư', 'thư viện', 'viện bảo tàng', 'tàng hình', 'hình như',
+];
+
+const VUA_TIENG_VIET_QUESTIONS = [
+  { answer: 'bánh chưng', hint: 'Món ăn truyền thống xuất hiện nhiều vào dịp Tết', category: 'Ẩm thực', difficulty: 'easy' },
+  { answer: 'mặt trời', hint: 'Ngôi sao ở trung tâm hệ Mặt Trời', category: 'Thiên nhiên', difficulty: 'easy' },
+  { answer: 'trống đồng', hint: 'Biểu tượng văn hóa gắn với Đông Sơn', category: 'Lịch sử', difficulty: 'easy' },
+  { answer: 'học sinh', hint: 'Người đến trường mỗi ngày để học tập', category: 'Đời sống', difficulty: 'easy' },
+  { answer: 'con thuyền', hint: 'Phương tiện di chuyển trên sông nước', category: 'Đồ vật', difficulty: 'easy' },
+  { answer: 'quả địa cầu', hint: 'Mô hình thường có trong lớp địa lý', category: 'Học đường', difficulty: 'easy' },
+  { answer: 'nước chảy đá mòn', hint: 'Thành ngữ nói về sự bền bỉ lâu dài', category: 'Thành ngữ', difficulty: 'medium' },
+  { answer: 'ăn quả nhớ kẻ trồng cây', hint: 'Câu nói nhắc con người biết ơn', category: 'Tục ngữ', difficulty: 'medium' },
+  { answer: 'lá lành đùm lá rách', hint: 'Tinh thần tương thân tương ái', category: 'Tục ngữ', difficulty: 'medium' },
+  { answer: 'đầu đội trời chân đạp đất', hint: 'Cách nói về khí phách hiên ngang', category: 'Thành ngữ', difficulty: 'medium' },
+  { answer: 'chậm mà chắc', hint: 'Thành ngữ khuyên làm gì cũng nên vững vàng', category: 'Thành ngữ', difficulty: 'medium' },
+  { answer: 'tôn sư trọng đạo', hint: 'Truyền thống quý trọng người dạy học', category: 'Giáo dục', difficulty: 'medium' },
+  { answer: 'hữu xạ tự nhiên hương', hint: 'Có tài thì tự khắc sẽ được biết đến', category: 'Thành ngữ', difficulty: 'hard' },
+  { answer: 'uống nước nhớ nguồn', hint: 'Bài học sống nhắc về cội nguồn', category: 'Tục ngữ', difficulty: 'hard' },
+  { answer: 'gần mực thì đen gần đèn thì sáng', hint: 'Tục ngữ về ảnh hưởng của môi trường sống', category: 'Tục ngữ', difficulty: 'hard' },
+  { answer: 'tre già măng mọc', hint: 'Hình ảnh nói về sự kế thừa giữa các thế hệ', category: 'Tục ngữ', difficulty: 'hard' },
+  { answer: 'đồng cam cộng khổ', hint: 'Thành ngữ chỉ sự cùng nhau vượt khó', category: 'Thành ngữ', difficulty: 'hard' },
+  { answer: 'một nắng hai sương', hint: 'Cách nói về sự vất vả lao động', category: 'Thành ngữ', difficulty: 'hard' },
+];
+
+function getXOWinner(board) {
+  for (const [a, b, c] of XO_WIN_LINES) {
+    if (board[a] && board[a] === board[b] && board[b] === board[c]) return board[a];
+  }
+  return null;
+}
+
+function buildXOButtons(game) {
+  return Array.from({ length: 3 }, (_, row) => {
+    const actionRow = new ActionRowBuilder();
+    for (let col = 0; col < 3; col++) {
+      const index = row * 3 + col;
+      const cell = game.board[index];
+      let style = ButtonStyle.Secondary;
+      if (cell === 'X') style = ButtonStyle.Danger;
+      if (cell === 'O') style = ButtonStyle.Primary;
+      actionRow.addComponents(
+        new ButtonBuilder()
+          .setCustomId(`xo:${game.channelId}:${index}`)
+          .setLabel(cell || String(index + 1))
+          .setStyle(style)
+          .setDisabled(Boolean(cell) || Boolean(game.winner))
+      );
+    }
+    return actionRow;
+  });
+}
+
+function buildXOEmbed(game) {
+  const status = game.winner === 'draw'
+    ? '🤝 Trận này hòa nhau.'
+    : game.winner
+      ? `🏆 <@${game.players[game.winner]}> đã thắng với quân ${game.winner}.`
+      : `🎯 Đến lượt <@${game.players[game.turn]}> (${game.turn}).`;
+
+  return new EmbedBuilder()
+    .setTitle('❌ X O')
+    .setColor(game.winner ? (game.winner === 'draw' ? COLORS.warning : COLORS.success) : COLORS.primary)
+    .setDescription(`❌ X: <@${game.players.X}>\n⭕ O: <@${game.players.O}>\n\n${status}`)
+    .setFooter({ text: 'Bấm nút để đánh cờ' })
+    .setTimestamp();
+}
+
+function getNoiTuLeader(scores) {
+  const top = Object.entries(scores ?? {}).sort((a, b) => b[1] - a[1])[0];
+  return top ? `<@${top[0]}> (${top[1]} lượt)` : 'Chưa có';
+}
+
+function buildNoiTuEmbed(game, title = '🔗 Nối từ') {
+  const target = getLastSyllable(game.currentWord);
+  return embed(
+    title,
+    `Từ hiện tại: **${game.currentWord}**\nTừ tiếp theo phải bắt đầu bằng: **${target}**\nTổng cụm từ hợp lệ: **${game.used.size}**\nNgười đang dẫn đầu: ${getNoiTuLeader(game.scores)}\n\nGửi đáp án bằng tin nhắn thường. Mỗi cụm nên có ít nhất 2 tiếng và không được lặp lại.`,
+    COLORS.info
+  );
+}
+
+function pickVuaTiengVietQuestion(difficulty) {
+  const pool = VUA_TIENG_VIET_QUESTIONS.filter(q => !difficulty || q.difficulty === difficulty);
+  return randomFrom(pool.length > 0 ? pool : VUA_TIENG_VIET_QUESTIONS);
+}
+
+function maskVuaTiengVietAnswer(answer) {
+  return answer
+    .split('')
+    .map(ch => (ch === ' ' ? '/' : '_'))
+    .join(' ');
+}
+
+function buildVuaTiengVietEmbed(game, title = '👑 Vua tiếng Việt', reveal = false) {
+  const timeLeft = Math.max(0, Math.ceil((game.endsAt - Date.now()) / 1000));
+  const lines = [
+    `Chủ đề: **${game.category}**`,
+    `Độ khó: **${game.difficultyLabel}**`,
+    `Gợi ý: ${game.hint}`,
+    reveal ? `Đáp án: **${game.answer}**` : `Đáp án: **${game.maskedAnswer}**`,
+  ];
+  if (!reveal) lines.push(`Thời gian còn lại: **${timeLeft}s**`);
+  lines.push('', 'Trả lời bằng tin nhắn thường trong channel này.');
+  return embed(title, lines.join('\n'), reveal ? COLORS.success : COLORS.primary);
+}
+
+async function handleNoiTuMessage(message) {
+  const game = noiTuGames.get(message.channelId);
+  if (!game) return false;
+
+  const content = normalizeGameText(message.content);
+  if (!content || !isCompoundWord(content)) return false;
+
+  const expected = getLastSyllable(game.currentWord);
+  if (getFirstSyllable(content) !== expected) {
+    await message.react('❌').catch(() => {});
+    return true;
+  }
+
+  if (game.used.has(content)) {
+    await message.reply(`⚠️ Cụm từ **${content}** đã được dùng rồi.`).then(m => setTimeout(() => m.delete().catch(() => {}), 5000)).catch(() => {});
+    return true;
+  }
+
+  game.currentWord = content;
+  game.used.add(content);
+  game.scores[message.author.id] = (game.scores[message.author.id] ?? 0) + 1;
+  await message.react('✅').catch(() => {});
+
+  if (game.used.size % 10 === 0) {
+    await message.channel.send({ embeds: [buildNoiTuEmbed(game, '🔥 Nối từ đang nóng')] }).catch(() => {});
+  }
+  return true;
+}
+
+async function handleVuaTiengVietMessage(message) {
+  const game = vuaTiengVietGames.get(message.channelId);
+  if (!game) return false;
+
+  const content = normalizeAnswerText(message.content);
+  if (!content || content !== game.normalizedAnswer) return false;
+
+  clearTimeout(game.timeout);
+  vuaTiengVietGames.delete(message.channelId);
+  await message.reply({
+    embeds: [
+      embed(
+        '👑 Có người trả lời đúng!',
+        `🎉 <@${message.author.id}> đã thắng trò Vua tiếng Việt.\nĐáp án: **${game.answer}**\nGợi ý: ${game.hint}`,
+        COLORS.success
+      )
+    ]
+  }).catch(() => {});
+  return true;
+}
 
 // ══════════════════════════════════════════════════════════
 //  CLIENT & MUSIC QUEUE
@@ -331,6 +544,31 @@ const commands = [
   new SlashCommandBuilder().setName('quote').setDescription('💬 Quote ngẫu nhiên'),
   new SlashCommandBuilder().setName('fact').setDescription('💡 Sự thật thú vị'),
 
+  // ── GAME (3 lệnh) ──
+  new SlashCommandBuilder().setName('xo').setDescription('❌ Chơi X O với bạn bè')
+    .addUserOption(o => o.setName('user').setDescription('Người chơi cùng').setRequired(true)),
+  new SlashCommandBuilder().setName('noitu').setDescription('🔗 Quản lý trò chơi nối từ')
+    .addStringOption(o => o.setName('action').setDescription('Hành động').setRequired(true)
+      .addChoices(
+        { name: 'Bắt đầu', value: 'start' },
+        { name: 'Xem trạng thái', value: 'status' },
+        { name: 'Dừng game', value: 'stop' }
+      ))
+    .addStringOption(o => o.setName('word').setDescription('Từ bắt đầu (ít nhất 2 tiếng)').setRequired(false)),
+  new SlashCommandBuilder().setName('vuatiengviet').setDescription('👑 Quản lý trò chơi Vua tiếng Việt')
+    .addStringOption(o => o.setName('action').setDescription('Hành động').setRequired(true)
+      .addChoices(
+        { name: 'Bắt đầu', value: 'start' },
+        { name: 'Xem trạng thái', value: 'status' },
+        { name: 'Dừng game', value: 'stop' }
+      ))
+    .addStringOption(o => o.setName('difficulty').setDescription('Độ khó').setRequired(false)
+      .addChoices(
+        { name: 'Dễ', value: 'easy' },
+        { name: 'Trung bình', value: 'medium' },
+        { name: 'Khó', value: 'hard' }
+      )),
+
   // ── UTILITY (12 lệnh) ──
   new SlashCommandBuilder().setName('poll').setDescription('📊 Tạo bình chọn')
     .addStringOption(o => o.setName('question').setDescription('Câu hỏi').setRequired(true))
@@ -397,6 +635,35 @@ client.once('ready', async () => {
 //  INTERACTION HANDLER (XỬ LÝ LỆNH)
 // ══════════════════════════════════════════════════════════
 client.on('interactionCreate', async interaction => {
+  if (interaction.isButton() && interaction.customId.startsWith('xo:')) {
+    const [, channelId, cellIndex] = interaction.customId.split(':');
+    const game = xoGames.get(channelId);
+
+    if (!game || game.messageId !== interaction.message.id) {
+      return interaction.reply({ content: 'Bàn cờ này đã hết hiệu lực.', ephemeral: true });
+    }
+    if (interaction.user.id !== game.players.X && interaction.user.id !== game.players.O) {
+      return interaction.reply({ content: 'Bạn không phải người chơi trong trận này.', ephemeral: true });
+    }
+    if (interaction.user.id !== game.players[game.turn]) {
+      return interaction.reply({ content: 'Chưa đến lượt bạn.', ephemeral: true });
+    }
+
+    const index = Number(cellIndex);
+    if (!Number.isInteger(index) || index < 0 || index > 8 || game.board[index]) {
+      return interaction.reply({ content: 'Ô này không hợp lệ hoặc đã được đánh rồi.', ephemeral: true });
+    }
+
+    game.board[index] = game.turn;
+    const winner = getXOWinner(game.board);
+    if (winner) game.winner = winner;
+    else if (game.board.every(Boolean)) game.winner = 'draw';
+    else game.turn = game.turn === 'X' ? 'O' : 'X';
+
+    if (game.winner) xoGames.delete(channelId);
+    return interaction.update({ embeds: [buildXOEmbed(game)], components: buildXOButtons(game) });
+  }
+
   if (!interaction.isChatInputCommand()) return;
   const cmd = interaction.commandName;
 
@@ -418,6 +685,7 @@ client.on('interactionCreate', async interaction => {
           { name: '🗑️ Xóa Chat', value: '`/purge` — theo user\n`/purgebot` — xóa tin bot\n`/purgelinks` — xóa tin chứa link\n`/purgeimages` — xóa tin chứa ảnh/file\n`/purgeword` — xóa theo từ khóa' },
           { name: '🎵 Music (7)', value: '`/play` `/skip` `/stop` `/queue` `/nowplaying` `/loop` `/shuffle`' },
           { name: '🎮 Fun (15)', value: '`/coinflip` `/roll` `/8ball` `/joke` `/meme` `/lovecalc` `/rps` `/slap` `/hug` `/kiss` `/pat` `/trivia` `/dadjoke` `/quote` `/fact`' },
+          { name: '🕹️ Game (3)', value: '`/xo` `/noitu` `/vuatiengviet`' },
           { name: '🔧 Utility (12)', value: '`/poll` `/remind` `/afk` `/timer` `/say` `/embed` `/announce` `/choose` `/reverse` `/base64` `/qrcode` `/shorturl`' },
           { name: '📊 Level/XP (5)', value: '`/rank` `/leaderboard` `/checkin` `/profile` `/badges`' }
         )
@@ -1119,6 +1387,148 @@ client.on('interactionCreate', async interaction => {
     // ════════════════════════════════════════════════════════
     //  UTILITY COMMANDS
     // ════════════════════════════════════════════════════════
+    if (cmd === 'xo') {
+      const target = interaction.options.getUser('user');
+      if (target.bot) return interaction.reply({ embeds: [errorEmbed('Lỗi', 'Không thể chơi X O với bot!')], ephemeral: true });
+      if (target.id === interaction.user.id) return interaction.reply({ embeds: [errorEmbed('Lỗi', 'Bạn không thể tự đấu với chính mình!')], ephemeral: true });
+
+      const activeGame = xoGames.get(interaction.channelId);
+      if (activeGame && Date.now() - activeGame.createdAt < 15 * 60 * 1000) {
+        return interaction.reply({ embeds: [errorEmbed('Đang có trận đấu', 'Channel này đang có một ván X O chưa kết thúc.')] , ephemeral: true });
+      }
+      if (activeGame) xoGames.delete(interaction.channelId);
+
+      const game = {
+        channelId: interaction.channelId,
+        players: { X: interaction.user.id, O: target.id },
+        board: Array(9).fill(null),
+        turn: 'X',
+        winner: null,
+        createdAt: Date.now(),
+      };
+
+      xoGames.set(interaction.channelId, game);
+      const message = await interaction.reply({
+        embeds: [buildXOEmbed(game)],
+        components: buildXOButtons(game),
+        fetchReply: true,
+      });
+      game.messageId = message.id;
+      return;
+    }
+
+    if (cmd === 'noitu') {
+      const action = interaction.options.getString('action');
+
+      if (action === 'start') {
+        if (noiTuGames.has(interaction.channelId)) {
+          return interaction.reply({ embeds: [errorEmbed('Đang chạy', 'Channel này đã có một game Nối từ rồi.')] , ephemeral: true });
+        }
+        if (vuaTiengVietGames.has(interaction.channelId)) {
+          return interaction.reply({ embeds: [errorEmbed('Bận channel', 'Channel này đang có game Vua tiếng Việt. Hãy dừng game đó trước.')] , ephemeral: true });
+        }
+
+        const rawWord = interaction.options.getString('word') ?? randomFrom(NOI_TU_WORD_BANK);
+        const startWord = normalizeGameText(rawWord);
+        if (!isCompoundWord(startWord)) {
+          return interaction.reply({ embeds: [errorEmbed('Lỗi', 'Từ bắt đầu phải có ít nhất 2 tiếng.')] , ephemeral: true });
+        }
+
+        const game = {
+          hostId: interaction.user.id,
+          currentWord: startWord,
+          used: new Set([startWord]),
+          scores: {},
+          startedAt: Date.now(),
+        };
+        noiTuGames.set(interaction.channelId, game);
+
+        const e = buildNoiTuEmbed(game, '🔗 Bắt đầu Nối từ')
+          .setFooter({ text: `Khởi tạo bởi ${interaction.user.tag}` });
+        return interaction.reply({ embeds: [e] });
+      }
+
+      const game = noiTuGames.get(interaction.channelId);
+      if (!game) {
+        return interaction.reply({ embeds: [errorEmbed('Không có game', 'Channel này chưa có game Nối từ nào đang chạy.')] , ephemeral: true });
+      }
+
+      if (action === 'status') {
+        return interaction.reply({ embeds: [buildNoiTuEmbed(game, '🔎 Trạng thái Nối từ')] });
+      }
+
+      if (!canManageChannelGame(interaction, game.hostId)) {
+        return interaction.reply({ embeds: [errorEmbed('Không đủ quyền', 'Chỉ người tạo game hoặc mod mới có thể dừng game này.')] , ephemeral: true });
+      }
+
+      noiTuGames.delete(interaction.channelId);
+      const summary = buildNoiTuEmbed(game, '🛑 Đã dừng Nối từ')
+        .setFooter({ text: `Kết thúc bởi ${interaction.user.tag}` });
+      return interaction.reply({ embeds: [summary] });
+    }
+
+    if (cmd === 'vuatiengviet') {
+      const action = interaction.options.getString('action');
+
+      if (action === 'start') {
+        if (vuaTiengVietGames.has(interaction.channelId)) {
+          return interaction.reply({ embeds: [errorEmbed('Đang chạy', 'Channel này đã có một game Vua tiếng Việt rồi.')] , ephemeral: true });
+        }
+        if (noiTuGames.has(interaction.channelId)) {
+          return interaction.reply({ embeds: [errorEmbed('Bận channel', 'Channel này đang có game Nối từ. Hãy dừng game đó trước.')] , ephemeral: true });
+        }
+
+        const difficulty = interaction.options.getString('difficulty') ?? 'medium';
+        const difficultyLabel = { easy: 'Dễ', medium: 'Trung bình', hard: 'Khó' }[difficulty] ?? 'Trung bình';
+        const durationMs = { easy: 90000, medium: 75000, hard: 60000 }[difficulty] ?? 75000;
+        const question = pickVuaTiengVietQuestion(difficulty);
+        const gameId = `${Date.now()}_${interaction.channelId}`;
+        const game = {
+          id: gameId,
+          hostId: interaction.user.id,
+          answer: question.answer,
+          normalizedAnswer: normalizeAnswerText(question.answer),
+          hint: question.hint,
+          category: question.category,
+          difficultyLabel,
+          maskedAnswer: maskVuaTiengVietAnswer(question.answer),
+          startedAt: Date.now(),
+          endsAt: Date.now() + durationMs,
+        };
+
+        game.timeout = setTimeout(() => {
+          const active = vuaTiengVietGames.get(interaction.channelId);
+          if (!active || active.id !== gameId) return;
+          vuaTiengVietGames.delete(interaction.channelId);
+          interaction.channel.send({ embeds: [buildVuaTiengVietEmbed(active, '⏰ Hết giờ Vua tiếng Việt', true)] }).catch(() => {});
+        }, durationMs);
+
+        vuaTiengVietGames.set(interaction.channelId, game);
+        const e = buildVuaTiengVietEmbed(game, '👑 Bắt đầu Vua tiếng Việt')
+          .setFooter({ text: `Khởi tạo bởi ${interaction.user.tag}` });
+        return interaction.reply({ embeds: [e] });
+      }
+
+      const game = vuaTiengVietGames.get(interaction.channelId);
+      if (!game) {
+        return interaction.reply({ embeds: [errorEmbed('Không có game', 'Channel này chưa có game Vua tiếng Việt nào đang chạy.')] , ephemeral: true });
+      }
+
+      if (action === 'status') {
+        return interaction.reply({ embeds: [buildVuaTiengVietEmbed(game, '🔎 Trạng thái Vua tiếng Việt')] });
+      }
+
+      if (!canManageChannelGame(interaction, game.hostId)) {
+        return interaction.reply({ embeds: [errorEmbed('Không đủ quyền', 'Chỉ người tạo game hoặc mod mới có thể dừng game này.')] , ephemeral: true });
+      }
+
+      clearTimeout(game.timeout);
+      vuaTiengVietGames.delete(interaction.channelId);
+      const e = buildVuaTiengVietEmbed(game, '🛑 Đã dừng Vua tiếng Việt', true)
+        .setFooter({ text: `Kết thúc bởi ${interaction.user.tag}` });
+      return interaction.reply({ embeds: [e] });
+    }
+
     if (cmd === 'poll') {
       const q = interaction.options.getString('question');
       const opts = [
@@ -1282,15 +1692,21 @@ client.on('interactionCreate', async interaction => {
 client.on('messageCreate', async message => {
   if (message.author.bot || !message.guild) return;
 
+  if (noiTuGames.has(message.channelId)) {
+    await handleNoiTuMessage(message);
+  } else if (vuaTiengVietGames.has(message.channelId)) {
+    await handleVuaTiengVietMessage(message);
+  }
+
   // XP cooldown: 60s
   const user = getXP(message.guildId, message.author.id);
-  if (Date.now() - user.lastMsg < 60000) return;
+  if (Date.now() - user.lastMsg >= 60000) {
+    const xpGain = Math.floor(Math.random() * 10) + 5; // 5-15 XP
+    const result = addXP(message.guildId, message.author.id, xpGain);
 
-  const xpGain = Math.floor(Math.random() * 10) + 5; // 5-15 XP
-  const result = addXP(message.guildId, message.author.id, xpGain);
-
-  if (result.leveledUp) {
-    message.channel.send(`🎉 <@${message.author.id}> đã lên **Level ${result.level}**! Chúc mừng! 🎊`).then(m => setTimeout(() => m.delete().catch(() => {}), 10000));
+    if (result.leveledUp) {
+      message.channel.send(`🎉 <@${message.author.id}> đã lên **Level ${result.level}**! Chúc mừng! 🎊`).then(m => setTimeout(() => m.delete().catch(() => {}), 10000));
+    }
   }
 
   // AFK check
