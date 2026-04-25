@@ -1,5 +1,5 @@
 // ============================================================
-//  DISCORD BOT FULL FEATURED - 80+ CHỨC NĂNG
+//  DISCORD BOT FULL FEATURED - 84+ CHỨC NĂNG
 //  Gộp chung 1 file duy nhất - Deploy ngay lên Railway
 // ============================================================
 
@@ -179,7 +179,7 @@ const client = new Client({
 const musicQueues = new Map(); // guildId -> { songs: [], loop: false, current: 0 }
 
 // ══════════════════════════════════════════════════════════
-//  SLASH COMMANDS DEFINITION (80+ LỆNH)
+//  SLASH COMMANDS DEFINITION (84+ LỆNH)
 // ══════════════════════════════════════════════════════════
 const commands = [
   // ── MENU ──
@@ -232,7 +232,7 @@ const commands = [
     .addStringOption(o => o.setName('to').setDescription('Sang').setRequired(true))
     .addNumberOption(o => o.setName('amount').setDescription('Số tiền').setRequired(false)),
 
-  // ── MOD (13 lệnh) ──
+  // ── MOD (17 lệnh — bao gồm 4 lệnh purge mới) ──
   new SlashCommandBuilder().setName('kick').setDescription('👢 Kick thành viên')
     .addUserOption(o => o.setName('user').setDescription('Thành viên').setRequired(true))
     .addStringOption(o => o.setName('reason').setDescription('Lý do').setRequired(false))
@@ -261,10 +261,26 @@ const commands = [
   new SlashCommandBuilder().setName('clearwarns').setDescription('🗑️ Xóa cảnh cáo')
     .addUserOption(o => o.setName('user').setDescription('Thành viên').setRequired(true))
     .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers),
+
+  // PURGE - xóa chat (4 lệnh mới + 1 nâng cấp)
   new SlashCommandBuilder().setName('purge').setDescription('🗑️ Xóa tin nhắn hàng loạt')
     .addIntegerOption(o => o.setName('amount').setDescription('Số lượng 1-100').setMinValue(1).setMaxValue(100).setRequired(true))
     .addUserOption(o => o.setName('user').setDescription('Chỉ xóa của user này').setRequired(false))
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages),
+  new SlashCommandBuilder().setName('purgebot').setDescription('🤖 Xóa tin nhắn của bot')
+    .addIntegerOption(o => o.setName('amount').setDescription('Số lượng cần quét (1-100)').setMinValue(1).setMaxValue(100).setRequired(true))
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages),
+  new SlashCommandBuilder().setName('purgelinks').setDescription('🔗 Xóa tin nhắn chứa link')
+    .addIntegerOption(o => o.setName('amount').setDescription('Số lượng cần quét (1-100)').setMinValue(1).setMaxValue(100).setRequired(true))
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages),
+  new SlashCommandBuilder().setName('purgeimages').setDescription('🖼️ Xóa tin nhắn chứa ảnh/file')
+    .addIntegerOption(o => o.setName('amount').setDescription('Số lượng cần quét (1-100)').setMinValue(1).setMaxValue(100).setRequired(true))
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages),
+  new SlashCommandBuilder().setName('purgeword').setDescription('🔍 Xóa tin nhắn chứa từ khóa')
+    .addStringOption(o => o.setName('keyword').setDescription('Từ khóa cần xóa').setRequired(true))
+    .addIntegerOption(o => o.setName('amount').setDescription('Số lượng cần quét (1-100)').setMinValue(1).setMaxValue(100).setRequired(false))
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages),
+
   new SlashCommandBuilder().setName('slowmode').setDescription('⏱️ Slowmode')
     .addIntegerOption(o => o.setName('seconds').setDescription('Giây 0-21600').setMinValue(0).setMaxValue(21600).setRequired(true))
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageChannels),
@@ -391,14 +407,15 @@ client.on('interactionCreate', async interaction => {
     //  MENU & HELP
     // ════════════════════════════════════════════════════════
     if (cmd === 'menu' || cmd === 'help') {
-      const embed = new EmbedBuilder()
+      const e = new EmbedBuilder()
         .setTitle('📋 Danh sách lệnh')
         .setColor(COLORS.primary)
         .setThumbnail(client.user.displayAvatarURL())
         .addFields(
           { name: '🤖 AI (11)', value: '`/ask` `/translate` `/summarize` `/grammar` `/explain` `/story` `/idea` `/quiz` `/define` `/roast` `/compliment`' },
           { name: 'ℹ️ Info (10)', value: '`/ping` `/userinfo` `/serverinfo` `/avatar` `/weather` `/crypto` `/calc` `/ipinfo` `/botstats` `/currency`' },
-          { name: '🛡️ Mod (13)', value: '`/kick` `/ban` `/unban` `/mute` `/unmute` `/warn` `/warns` `/clearwarns` `/purge` `/slowmode` `/lock` `/unlock` `/nickname`' },
+          { name: '🛡️ Mod (17)', value: '`/kick` `/ban` `/unban` `/mute` `/unmute` `/warn` `/warns` `/clearwarns` `/purge` `/purgebot` `/purgelinks` `/purgeimages` `/purgeword` `/slowmode` `/lock` `/unlock` `/nickname`' },
+          { name: '🗑️ Xóa Chat', value: '`/purge` — theo user\n`/purgebot` — xóa tin bot\n`/purgelinks` — xóa tin chứa link\n`/purgeimages` — xóa tin chứa ảnh/file\n`/purgeword` — xóa theo từ khóa' },
           { name: '🎵 Music (7)', value: '`/play` `/skip` `/stop` `/queue` `/nowplaying` `/loop` `/shuffle`' },
           { name: '🎮 Fun (15)', value: '`/coinflip` `/roll` `/8ball` `/joke` `/meme` `/lovecalc` `/rps` `/slap` `/hug` `/kiss` `/pat` `/trivia` `/dadjoke` `/quote` `/fact`' },
           { name: '🔧 Utility (12)', value: '`/poll` `/remind` `/afk` `/timer` `/say` `/embed` `/announce` `/choose` `/reverse` `/base64` `/qrcode` `/shorturl`' },
@@ -406,7 +423,7 @@ client.on('interactionCreate', async interaction => {
         )
         .setFooter({ text: `Tổng ${commands.length} lệnh | Powered by Groq AI` })
         .setTimestamp();
-      return interaction.reply({ embeds: [embed] });
+      return interaction.reply({ embeds: [e] });
     }
 
     // ════════════════════════════════════════════════════════
@@ -692,16 +709,147 @@ client.on('interactionCreate', async interaction => {
       return interaction.reply({ embeds: [successEmbed('Đã xóa', `Xóa cảnh cáo của ${target.tag}`)] });
     }
 
+    // ════════════════════════════════════════════════════════
+    //  PURGE COMMANDS - XÓA CHAT
+    // ════════════════════════════════════════════════════════
+
+    // Helper: giới hạn tin nhắn Discord bulkDelete (phải dưới 14 ngày)
+    const FOURTEEN_DAYS = 14 * 24 * 60 * 60 * 1000;
+
     if (cmd === 'purge') {
       const amount = interaction.options.getInteger('amount');
       const user = interaction.options.getUser('user');
       await interaction.deferReply({ ephemeral: true });
+
       let messages = await interaction.channel.messages.fetch({ limit: 100 });
+
+      // Lọc theo user nếu có
       if (user) messages = messages.filter(m => m.author.id === user.id);
-      messages = messages.filter(m => Date.now() - m.createdTimestamp < 14 * 24 * 60 * 60 * 1000);
+
+      // Kiểm tra tin quá 14 ngày
+      const tooOld = [...messages.values()].filter(m => Date.now() - m.createdTimestamp >= FOURTEEN_DAYS);
+      messages = messages.filter(m => Date.now() - m.createdTimestamp < FOURTEEN_DAYS);
       messages = [...messages.values()].slice(0, amount);
+
+      if (messages.length === 0) {
+        return interaction.editReply({
+          embeds: [errorEmbed('Không có gì để xóa',
+            tooOld.length > 0
+              ? `⚠️ ${tooOld.length} tin nhắn quá **14 ngày** — Discord không cho phép xóa hàng loạt!`
+              : 'Không tìm thấy tin nhắn phù hợp!'
+          )]
+        });
+      }
+
       const deleted = await interaction.channel.bulkDelete(messages, true);
-      return interaction.editReply({ embeds: [successEmbed('Đã xóa', `Xóa **${deleted.size}** tin nhắn${user ? ` của ${user.tag}` : ''}`)] });
+      console.log(`[PURGE] #${interaction.channel.name} | ${interaction.user.tag} xóa ${deleted.size} tin${user ? ` của ${user.tag}` : ''}`);
+
+      return interaction.editReply({
+        embeds: [successEmbed('🗑️ Đã xóa tin nhắn',
+          `✅ Xóa **${deleted.size}** tin nhắn${user ? ` của **${user.tag}**` : ''}\n📍 Kênh: ${interaction.channel}\n👮 Mod: ${interaction.user.tag}${tooOld.length > 0 ? `\n⚠️ Bỏ qua **${tooOld.length}** tin quá 14 ngày` : ''}`
+        )]
+      });
+    }
+
+    // ─── PURGE BOT ─────────────────────────────────────────
+    if (cmd === 'purgebot') {
+      const amount = interaction.options.getInteger('amount');
+      await interaction.deferReply({ ephemeral: true });
+
+      let messages = await interaction.channel.messages.fetch({ limit: 100 });
+      messages = [...messages.values()]
+        .filter(m => m.author.bot && Date.now() - m.createdTimestamp < FOURTEEN_DAYS)
+        .slice(0, amount);
+
+      if (messages.length === 0) {
+        return interaction.editReply({ embeds: [errorEmbed('Không tìm thấy', 'Không có tin nhắn bot nào trong phạm vi cho phép!')] });
+      }
+
+      const deleted = await interaction.channel.bulkDelete(messages, true);
+      console.log(`[PURGEBOT] #${interaction.channel.name} | ${interaction.user.tag} xóa ${deleted.size} tin bot`);
+
+      return interaction.editReply({
+        embeds: [successEmbed('🤖 Đã xóa tin nhắn Bot',
+          `✅ Xóa **${deleted.size}** tin nhắn của bot\n📍 Kênh: ${interaction.channel}\n👮 Mod: ${interaction.user.tag}`
+        )]
+      });
+    }
+
+    // ─── PURGE LINKS ───────────────────────────────────────
+    if (cmd === 'purgelinks') {
+      const amount = interaction.options.getInteger('amount');
+      await interaction.deferReply({ ephemeral: true });
+
+      const linkRegex = /https?:\/\/\S+/i;
+      let messages = await interaction.channel.messages.fetch({ limit: 100 });
+      messages = [...messages.values()]
+        .filter(m => linkRegex.test(m.content) && Date.now() - m.createdTimestamp < FOURTEEN_DAYS)
+        .slice(0, amount);
+
+      if (messages.length === 0) {
+        return interaction.editReply({ embeds: [errorEmbed('Không tìm thấy', 'Không có tin nhắn nào chứa link trong phạm vi!')] });
+      }
+
+      const deleted = await interaction.channel.bulkDelete(messages, true);
+      console.log(`[PURGELINKS] #${interaction.channel.name} | ${interaction.user.tag} xóa ${deleted.size} tin chứa link`);
+
+      return interaction.editReply({
+        embeds: [successEmbed('🔗 Đã xóa tin nhắn chứa Link',
+          `✅ Xóa **${deleted.size}** tin nhắn chứa link\n📍 Kênh: ${interaction.channel}\n👮 Mod: ${interaction.user.tag}`
+        )]
+      });
+    }
+
+    // ─── PURGE IMAGES ──────────────────────────────────────
+    if (cmd === 'purgeimages') {
+      const amount = interaction.options.getInteger('amount');
+      await interaction.deferReply({ ephemeral: true });
+
+      let messages = await interaction.channel.messages.fetch({ limit: 100 });
+      messages = [...messages.values()]
+        .filter(m =>
+          (m.attachments.size > 0 || m.embeds.some(e => e.image || e.thumbnail)) &&
+          Date.now() - m.createdTimestamp < FOURTEEN_DAYS
+        )
+        .slice(0, amount);
+
+      if (messages.length === 0) {
+        return interaction.editReply({ embeds: [errorEmbed('Không tìm thấy', 'Không có tin nhắn nào chứa ảnh/file trong phạm vi!')] });
+      }
+
+      const deleted = await interaction.channel.bulkDelete(messages, true);
+      console.log(`[PURGEIMAGES] #${interaction.channel.name} | ${interaction.user.tag} xóa ${deleted.size} tin chứa ảnh/file`);
+
+      return interaction.editReply({
+        embeds: [successEmbed('🖼️ Đã xóa tin nhắn chứa Ảnh/File',
+          `✅ Xóa **${deleted.size}** tin nhắn chứa ảnh/file\n📍 Kênh: ${interaction.channel}\n👮 Mod: ${interaction.user.tag}`
+        )]
+      });
+    }
+
+    // ─── PURGE WORD ────────────────────────────────────────
+    if (cmd === 'purgeword') {
+      const keyword = interaction.options.getString('keyword').toLowerCase();
+      const amount = interaction.options.getInteger('amount') ?? 50;
+      await interaction.deferReply({ ephemeral: true });
+
+      let messages = await interaction.channel.messages.fetch({ limit: 100 });
+      messages = [...messages.values()]
+        .filter(m => m.content.toLowerCase().includes(keyword) && Date.now() - m.createdTimestamp < FOURTEEN_DAYS)
+        .slice(0, amount);
+
+      if (messages.length === 0) {
+        return interaction.editReply({ embeds: [errorEmbed('Không tìm thấy', `Không có tin nhắn nào chứa từ khóa **"${keyword}"** trong phạm vi!`)] });
+      }
+
+      const deleted = await interaction.channel.bulkDelete(messages, true);
+      console.log(`[PURGEWORD] #${interaction.channel.name} | keyword="${keyword}" | ${interaction.user.tag} xóa ${deleted.size} tin`);
+
+      return interaction.editReply({
+        embeds: [successEmbed('🔍 Đã xóa tin nhắn theo từ khóa',
+          `✅ Xóa **${deleted.size}** tin nhắn chứa **"${keyword}"**\n📍 Kênh: ${interaction.channel}\n👮 Mod: ${interaction.user.tag}`
+        )]
+      });
     }
 
     if (cmd === 'slowmode') {
