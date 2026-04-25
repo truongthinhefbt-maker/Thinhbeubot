@@ -164,6 +164,56 @@ async function searchYouTube(query) {
   };
 }
 
+function decodeHtml(text) {
+  return `${text ?? ''}`
+    .replace(/&amp;/g, '&')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&#x2F;/g, '/');
+}
+
+function stripHtmlTags(text) {
+  return decodeHtml(`${text ?? ''}`.replace(/<[^>]+>/g, ' ')).replace(/\s+/g, ' ').trim();
+}
+
+async function searchTikTok(query) {
+  const searchQuery = `${query}`.trim();
+  if (!searchQuery) return null;
+
+  const searchUrl = `https://www.tiktok.com/search/video?q=${encodeURIComponent(searchQuery)}`;
+  const ddgUrl = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(`site:tiktok.com ${searchQuery}`)}`;
+
+  try {
+    const res = await fetch(ddgUrl, { headers: { 'User-Agent': 'Mozilla/5.0' } });
+    const html = await res.text();
+
+    const matches = [...html.matchAll(/<a[^>]+class="result__a"[^>]+href="[^"]*uddg=([^"&]+)[^"]*"[^>]*>(.*?)<\/a>/gsi)];
+    for (const match of matches) {
+      const url = decodeURIComponent(match[1]);
+      if (!/tiktok\.com\/@[^/]+\/video\/\d+/i.test(url)) continue;
+      const title = stripHtmlTags(match[2]) || `TikTok result cho "${searchQuery}"`;
+      const creator = url.match(/tiktok\.com\/(@[^/]+)\//i)?.[1] ?? 'TikTok Creator';
+      return { url, title, creator, searchUrl, isSearchPage: false };
+    }
+
+    const directUrl = html.match(/https?:\/\/(?:www\.)?tiktok\.com\/@[^"' <]+\/video\/\d+/i)?.[0];
+    if (directUrl) {
+      const creator = directUrl.match(/tiktok\.com\/(@[^/]+)\//i)?.[1] ?? 'TikTok Creator';
+      return { url: directUrl, title: `TikTok result cho "${searchQuery}"`, creator, searchUrl, isSearchPage: false };
+    }
+  } catch {}
+
+  return {
+    url: searchUrl,
+    title: `Mở kết quả TikTok cho "${searchQuery}"`,
+    creator: 'TikTok Search',
+    searchUrl,
+    isSearchPage: true,
+  };
+}
+
 function randomFrom(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
 function truncate(text, max = 1000) { return text.length > max ? text.slice(0, max) + '...' : text; }
 
@@ -294,13 +344,82 @@ function getLastSyllable(text) {
   return syllables[syllables.length - 1] ?? '';
 }
 
+function scrambleLetters(text) {
+  const chars = normalizeGameText(text).replace(/\s+/g, '').split('');
+  if (chars.length <= 1) return chars.join(' / ');
+
+  const original = chars.join('');
+  let shuffled = [...chars];
+  for (let i = 0; i < 8; i++) {
+    shuffled = [...chars];
+    for (let j = shuffled.length - 1; j > 0; j--) {
+      const k = Math.floor(Math.random() * (j + 1));
+      [shuffled[j], shuffled[k]] = [shuffled[k], shuffled[j]];
+    }
+    if (shuffled.join('') !== original) break;
+  }
+  return shuffled.join(' / ');
+}
+
+async function validateNoiTuPhrase(text) {
+  const content = normalizeGameText(text);
+  if (!content || !isCompoundWord(content)) return false;
+
+  const syllables = getSyllables(content);
+  if (syllables.length < 2 || syllables.length > 6) return false;
+  if (syllables.some(s => s.length > 12 || !/[aeiouy]/i.test(stripVietnameseAccents(s)))) return false;
+
+  if (noiTuValidationCache.has(content)) return noiTuValidationCache.get(content);
+
+  if (!GROQ_KEY) {
+    noiTuValidationCache.set(content, true);
+    return true;
+  }
+
+  try {
+    const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${GROQ_KEY}` },
+      body: JSON.stringify({
+        model: 'llama-3.3-70b-versatile',
+        temperature: 0,
+        max_tokens: 8,
+        messages: [
+          {
+            role: 'system',
+            content: 'Bạn là bộ lọc cho game nối từ tiếng Việt. Chỉ trả lời đúng một từ: VALID hoặc INVALID.'
+          },
+          {
+            role: 'user',
+            content:
+              `Đánh giá cụm từ tiếng Việt sau: "${content}".\n` +
+              'VALID nếu đây là từ ghép, cụm từ, collocation hoặc thành ngữ tự nhiên có nghĩa.\n' +
+              'INVALID nếu đây là chuỗi ghép bừa, vô nghĩa, quá gượng ép hoặc không tự nhiên.\n' +
+              'Chỉ trả lời VALID hoặc INVALID.'
+          }
+        ]
+      }),
+    });
+
+    const data = await res.json();
+    const verdict = `${data.choices?.[0]?.message?.content ?? ''}`.trim().toUpperCase();
+    const isValid = /^VALID\b/.test(verdict);
+    noiTuValidationCache.set(content, isValid);
+    return isValid;
+  } catch {
+    noiTuValidationCache.set(content, true);
+    return true;
+  }
+}
+
 function canManageChannelGame(interaction, hostId) {
   return interaction.user.id === hostId || interaction.memberPermissions?.has(PermissionFlagsBits.ManageMessages);
 }
 
 const xoGames = new Map(); // channelId -> { players, board, turn, winner, createdAt, messageId }
 const noiTuGames = new Map(); // channelId -> { currentWord, used, scores, hostId }
-const vuaTiengVietGames = new Map(); // channelId -> { answer, hint, category, timeout, endsAt, hostId }
+const vuaTiengVietGames = new Map(); // channelId -> { answer, scrambledLetters, category, timeout, endsAt, hostId }
+const noiTuValidationCache = new Map();
 
 const XO_WIN_LINES = [
   [0, 1, 2], [3, 4, 5], [6, 7, 8],
@@ -316,24 +435,24 @@ const NOI_TU_WORD_BANK = [
 ];
 
 const VUA_TIENG_VIET_QUESTIONS = [
-  { answer: 'bánh chưng', hint: 'Món ăn truyền thống xuất hiện nhiều vào dịp Tết', category: 'Ẩm thực', difficulty: 'easy' },
-  { answer: 'mặt trời', hint: 'Ngôi sao ở trung tâm hệ Mặt Trời', category: 'Thiên nhiên', difficulty: 'easy' },
-  { answer: 'trống đồng', hint: 'Biểu tượng văn hóa gắn với Đông Sơn', category: 'Lịch sử', difficulty: 'easy' },
-  { answer: 'học sinh', hint: 'Người đến trường mỗi ngày để học tập', category: 'Đời sống', difficulty: 'easy' },
-  { answer: 'con thuyền', hint: 'Phương tiện di chuyển trên sông nước', category: 'Đồ vật', difficulty: 'easy' },
-  { answer: 'quả địa cầu', hint: 'Mô hình thường có trong lớp địa lý', category: 'Học đường', difficulty: 'easy' },
-  { answer: 'nước chảy đá mòn', hint: 'Thành ngữ nói về sự bền bỉ lâu dài', category: 'Thành ngữ', difficulty: 'medium' },
-  { answer: 'ăn quả nhớ kẻ trồng cây', hint: 'Câu nói nhắc con người biết ơn', category: 'Tục ngữ', difficulty: 'medium' },
-  { answer: 'lá lành đùm lá rách', hint: 'Tinh thần tương thân tương ái', category: 'Tục ngữ', difficulty: 'medium' },
-  { answer: 'đầu đội trời chân đạp đất', hint: 'Cách nói về khí phách hiên ngang', category: 'Thành ngữ', difficulty: 'medium' },
-  { answer: 'chậm mà chắc', hint: 'Thành ngữ khuyên làm gì cũng nên vững vàng', category: 'Thành ngữ', difficulty: 'medium' },
-  { answer: 'tôn sư trọng đạo', hint: 'Truyền thống quý trọng người dạy học', category: 'Giáo dục', difficulty: 'medium' },
-  { answer: 'hữu xạ tự nhiên hương', hint: 'Có tài thì tự khắc sẽ được biết đến', category: 'Thành ngữ', difficulty: 'hard' },
-  { answer: 'uống nước nhớ nguồn', hint: 'Bài học sống nhắc về cội nguồn', category: 'Tục ngữ', difficulty: 'hard' },
-  { answer: 'gần mực thì đen gần đèn thì sáng', hint: 'Tục ngữ về ảnh hưởng của môi trường sống', category: 'Tục ngữ', difficulty: 'hard' },
-  { answer: 'tre già măng mọc', hint: 'Hình ảnh nói về sự kế thừa giữa các thế hệ', category: 'Tục ngữ', difficulty: 'hard' },
-  { answer: 'đồng cam cộng khổ', hint: 'Thành ngữ chỉ sự cùng nhau vượt khó', category: 'Thành ngữ', difficulty: 'hard' },
-  { answer: 'một nắng hai sương', hint: 'Cách nói về sự vất vả lao động', category: 'Thành ngữ', difficulty: 'hard' },
+  { answer: 'áo dài', category: 'Trang phục', difficulty: 'easy' },
+  { answer: 'bánh mì', category: 'Ẩm thực', difficulty: 'easy' },
+  { answer: 'hoa sen', category: 'Thiên nhiên', difficulty: 'easy' },
+  { answer: 'học sinh', category: 'Học đường', difficulty: 'easy' },
+  { answer: 'mặt trời', category: 'Thiên nhiên', difficulty: 'easy' },
+  { answer: 'xe đạp', category: 'Phương tiện', difficulty: 'easy' },
+  { answer: 'bồ câu', category: 'Động vật', difficulty: 'medium' },
+  { answer: 'cầu vồng', category: 'Thiên nhiên', difficulty: 'medium' },
+  { answer: 'máy tính', category: 'Công nghệ', difficulty: 'medium' },
+  { answer: 'thủ đô', category: 'Địa lý', difficulty: 'medium' },
+  { answer: 'trống đồng', category: 'Lịch sử', difficulty: 'medium' },
+  { answer: 'xe cứu hỏa', category: 'Phương tiện', difficulty: 'medium' },
+  { answer: 'bạch tuộc', category: 'Động vật', difficulty: 'hard' },
+  { answer: 'dạ khúc', category: 'Âm nhạc', difficulty: 'hard' },
+  { answer: 'hải đăng', category: 'Biển cả', difficulty: 'hard' },
+  { answer: 'phù sa', category: 'Địa lý', difficulty: 'hard' },
+  { answer: 'thủy triều', category: 'Thiên nhiên', difficulty: 'hard' },
+  { answer: 'vũ trụ', category: 'Khoa học', difficulty: 'hard' },
 ];
 
 function getXOWinner(board) {
@@ -394,7 +513,7 @@ function buildNoiTuEmbed(game, title = '🔗 Nối từ') {
       `➡️ Từ tiếp theo phải bắt đầu bằng: **${target}**\n` +
       `🔥 Tổng cụm đã nối: **${game.used.size}**\n` +
       `👑 Người dẫn đầu: ${getNoiTuLeader(game.scores)}\n\n` +
-      'Gửi đáp án bằng tin nhắn thường. Cụm từ phải có ít nhất 2 tiếng và không được trùng.'
+      'Gửi đáp án bằng tin nhắn thường. Cụm từ phải có ít nhất 2 tiếng, có nghĩa và không được trùng.'
     )
     .setFooter({ text: 'Lệnh nhanh: /nt | Lệnh quản lý: /noitu' })
     .setTimestamp();
@@ -405,20 +524,14 @@ function pickVuaTiengVietQuestion(difficulty) {
   return randomFrom(pool.length > 0 ? pool : VUA_TIENG_VIET_QUESTIONS);
 }
 
-function maskVuaTiengVietAnswer(answer) {
-  return answer
-    .split('')
-    .map(ch => (ch === ' ' ? '/' : '_'))
-    .join(' ');
-}
-
 function buildVuaTiengVietEmbed(game, title = '👑 Vua tiếng Việt', reveal = false) {
   const timeLeft = Math.max(0, Math.ceil((game.endsAt - Date.now()) / 1000));
   const lines = [
     `📚 Chủ đề: **${game.category}**`,
     `🎚️ Độ khó: **${game.difficultyLabel}**`,
-    `💡 Gợi ý: ${game.hint}`,
-    reveal ? `✅ Đáp án: **${game.answer}**` : `🔤 Đáp án: **${game.maskedAnswer}**`,
+    `🔀 Chữ cái xáo trộn: **${game.scrambledLetters}**`,
+    `🔢 Số chữ cái: **${game.letterCount}** | Số tiếng: **${game.syllableCount}**`,
+    reveal ? `✅ Đáp án: **${game.answer}**` : '🧩 Hãy ghép lại thành từ hoặc cụm từ đúng.',
   ];
   if (!reveal) lines.push(`⏳ Thời gian còn lại: **${timeLeft}s**`);
   lines.push('', 'Trả lời bằng tin nhắn thường trong channel này.');
@@ -448,6 +561,15 @@ async function handleNoiTuMessage(message) {
     return true;
   }
 
+  const isValidPhrase = await validateNoiTuPhrase(content);
+  if (!isValidPhrase) {
+    await message.react('❌').catch(() => {});
+    await message.reply(`⚠️ Cụm từ **${content}** chưa hợp lệ hoặc không tự nhiên trong tiếng Việt.`)
+      .then(m => setTimeout(() => m.delete().catch(() => {}), 5000))
+      .catch(() => {});
+    return true;
+  }
+
   game.currentWord = content;
   game.used.add(content);
   game.scores[message.author.id] = (game.scores[message.author.id] ?? 0) + 1;
@@ -472,7 +594,7 @@ async function handleVuaTiengVietMessage(message) {
     embeds: [
       embed(
         '👑 Có người trả lời đúng!',
-        `🎉 <@${message.author.id}> đã thắng trò Vua tiếng Việt.\nĐáp án: **${game.answer}**\nGợi ý: ${game.hint}`,
+        `🎉 <@${message.author.id}> đã thắng trò Vua tiếng Việt.\nĐáp án: **${game.answer}**\nChữ cái ban đầu: **${game.scrambledLetters}**`,
         COLORS.success
       )
     ]
@@ -527,7 +649,7 @@ const commands = [
   new SlashCommandBuilder().setName('compliment').setDescription('💐 AI khen ngợi')
     .addUserOption(o => o.setName('user').setDescription('Người cần khen').setRequired(false)),
 
-  // ── INFO (10 lệnh) ──
+  // ── INFO (11 lệnh) ──
   new SlashCommandBuilder().setName('ping').setDescription('🏓 Độ trễ bot'),
   new SlashCommandBuilder().setName('userinfo').setDescription('👤 Thông tin thành viên')
     .addUserOption(o => o.setName('user').setDescription('Thành viên').setRequired(false)),
@@ -622,7 +744,7 @@ const commands = [
   new SlashCommandBuilder().setName('loop').setDescription('🔁 Bật/tắt lặp'),
   new SlashCommandBuilder().setName('shuffle').setDescription('🔀 Xáo trộn'),
 
-  // ── FUN (15 lệnh) ──
+  // ── FUN (16 lệnh) ──
   new SlashCommandBuilder().setName('coinflip').setDescription('🪙 Tung đồng xu'),
   new SlashCommandBuilder().setName('roll').setDescription('🎲 Tung xúc xắc')
     .addIntegerOption(o => o.setName('sides').setDescription('Số mặt (mặc định 6)').setMinValue(2).setMaxValue(100).setRequired(false)),
@@ -648,8 +770,10 @@ const commands = [
   new SlashCommandBuilder().setName('dadjoke').setDescription('👨 Dad joke'),
   new SlashCommandBuilder().setName('quote').setDescription('💬 Quote ngẫu nhiên'),
   new SlashCommandBuilder().setName('fact').setDescription('💡 Sự thật thú vị'),
+  new SlashCommandBuilder().setName('tiktok').setDescription('🎵 Tìm video TikTok')
+    .addStringOption(o => o.setName('query').setDescription('Từ khóa tìm kiếm').setRequired(true)),
 
-  // ── GAME (3 lệnh) ──
+  // ── GAME (5 lệnh) ──
   new SlashCommandBuilder().setName('xo').setDescription('❌ Chơi X O với bạn bè')
     .addUserOption(o => o.setName('user').setDescription('Người chơi cùng').setRequired(true)),
   new SlashCommandBuilder().setName('nt').setDescription('🔗 Nối từ nhanh')
@@ -799,7 +923,7 @@ client.on('interactionCreate', async interaction => {
           { name: '🛡️ Mod (17)', value: '`/kick` `/ban` `/unban` `/mute` `/unmute` `/warn` `/warns` `/clearwarns` `/purge` `/purgebot` `/purgelinks` `/purgeimages` `/purgeword` `/slowmode` `/lock` `/unlock` `/nickname`' },
           { name: '🗑️ Xóa Chat', value: '`/purge` — theo user\n`/purgebot` — xóa tin bot\n`/purgelinks` — xóa tin chứa link\n`/purgeimages` — xóa tin chứa ảnh/file\n`/purgeword` — xóa theo từ khóa' },
           { name: '🎵 Music (7)', value: '`/play` `/skip` `/stop` `/queue` `/nowplaying` `/loop` `/shuffle`' },
-          { name: '🎮 Fun (15)', value: '`/coinflip` `/roll` `/8ball` `/joke` `/meme` `/lovecalc` `/rps` `/slap` `/hug` `/kiss` `/pat` `/trivia` `/dadjoke` `/quote` `/fact`' },
+          { name: '🎮 Fun (16)', value: '`/coinflip` `/roll` `/8ball` `/joke` `/meme` `/lovecalc` `/rps` `/slap` `/hug` `/kiss` `/pat` `/trivia` `/dadjoke` `/quote` `/fact` `/tiktok`' },
           { name: '🕹️ Game (5)', value: '`/xo` `/nt` `/vtv` `/noitu` `/vuatiengviet`' },
           { name: '🔧 Utility (12)', value: '`/poll` `/remind` `/afk` `/timer` `/say` `/embed` `/announce` `/choose` `/reverse` `/base64` `/qrcode` `/shorturl`' },
           { name: '📊 Level/XP (5)', value: '`/rank` `/leaderboard` `/checkin` `/profile` `/badges`' }
@@ -1526,6 +1650,28 @@ client.on('interactionCreate', async interaction => {
       } catch { return interaction.editReply({ embeds: [errorEmbed('Lỗi', 'Không lấy được fact!')] }); }
     }
 
+    if (cmd === 'tiktok') {
+      await interaction.deferReply();
+      const query = interaction.options.getString('query');
+      try {
+        const result = await searchTikTok(query);
+        if (!result) return interaction.editReply({ embeds: [errorEmbed('Không tìm thấy', `Không có kết quả TikTok cho: **${query}**`)] });
+
+        const e = new EmbedBuilder()
+          .setTitle('🎵 Kết quả TikTok')
+          .setColor(COLORS.info)
+          .setDescription(`🔎 Từ khóa: **${query}**\n🎬 Tiêu đề: **${truncate(result.title, 200)}**\n▶️ [Mở trên TikTok](${result.url})`)
+          .addFields(
+            { name: '👤 Nguồn', value: result.creator || 'TikTok', inline: true },
+            { name: '🌐 Loại', value: result.isSearchPage ? 'Trang kết quả' : 'Video trực tiếp', inline: true }
+          )
+          .setFooter({ text: `Yêu cầu bởi ${interaction.user.tag}` });
+        return interaction.editReply({ embeds: [e] });
+      } catch {
+        return interaction.editReply({ embeds: [errorEmbed('Lỗi', 'Không tìm được video TikTok!')] });
+      }
+    }
+
     // ════════════════════════════════════════════════════════
     //  UTILITY COMMANDS
     // ════════════════════════════════════════════════════════
@@ -1630,10 +1776,11 @@ client.on('interactionCreate', async interaction => {
           hostId: interaction.user.id,
           answer: question.answer,
           normalizedAnswer: normalizeAnswerText(question.answer),
-          hint: question.hint,
           category: question.category,
           difficultyLabel,
-          maskedAnswer: maskVuaTiengVietAnswer(question.answer),
+          scrambledLetters: scrambleLetters(question.answer),
+          syllableCount: getSyllables(question.answer).length,
+          letterCount: normalizeGameText(question.answer).replace(/\s+/g, '').length,
           startedAt: Date.now(),
           endsAt: Date.now() + durationMs,
         };
