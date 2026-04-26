@@ -624,9 +624,16 @@ const commands = [
   new SlashCommandBuilder().setName('menu').setDescription('📋 Xem toàn bộ lệnh'),
   new SlashCommandBuilder().setName('help').setDescription('❓ Hướng dẫn sử dụng bot'),
 
-  // ── HƯỚNG DẪN (1 lệnh mới) ──
-  new SlashCommandBuilder().setName('huongdan').setDescription('📖 Hướng dẫn sử dụng lệnh /bypass'),
-
+  // ── HƯỚNG DẪN ──
+new SlashCommandBuilder()
+  .setName('huongdan')
+  .setDescription('📖 Hướng dẫn sử dụng các lệnh của bot')
+  .addStringOption(o =>
+    o.setName('lenh')
+      .setDescription('Chọn lệnh cần xem hướng dẫn')
+      .setRequired(false)
+      .addChoices({ name: '🔓 bypass', value: 'bypass' })
+  ),
   // ── AI (11 lệnh) ──
   new SlashCommandBuilder().setName('ask').setDescription('🤖 Hỏi Groq AI')
     .addStringOption(o => o.setName('cauhoi').setDescription('Câu hỏi').setRequired(true)),
@@ -945,28 +952,35 @@ client.on('interactionCreate', async interaction => {
     // ════════════════════════════════════════════════════════
     //  HƯỚNG DẪN BYPASS  ← LỆNH MỚI THÊM VÀO
     // ════════════════════════════════════════════════════════
-    if (cmd === 'huongdan') {
-      const e = new EmbedBuilder()
-        .setTitle('📖 Hướng dẫn sử dụng lệnh /bypass')
-        .setColor(COLORS.info)
-        .setDescription(
-          '### 📌 Các bước thực hiện\n\n' +
-          '**Bước 1️⃣** — Vào thanh chat, gõ lệnh `/bypass`\n\n' +
-          '**Bước 2️⃣** — Sau khi lệnh hiện ra như này:\n' +
-          '> `/bypass` `url` `|`\n\n' +
-          '**Bước 3️⃣** — Điền đường link cần bypass vào chỗ **url**\n\n' +
-          '**Bước 4️⃣** — Bấm **Enter** hoặc **Gửi**, rồi chờ khoảng **5–10 giây**\n\n' +
-          '**Bước 5️⃣** — Bot trả kết quả → **Copy và dán** vào là xong! ✅\n\n' +
-          '---\n' +
-          '### ⚠️ Lưu ý quan trọng\n' +
-          '> • Bot **không** bypass được các link dạng `link4...` và một số loại link đặc biệt khác\n' +
-          '> • Phải nhập **đúng đường dẫn** (khuyến khích có `https://`) thì bot mới xử lý được\n' +
-          '> • Nếu sau **10 giây** không có kết quả, hãy kiểm tra lại link và thử lại'
-        )
-        .setFooter({ text: 'Chúc bạn bypass thành công! 🎉' })
-        .setTimestamp();
-      return interaction.reply({ embeds: [e] });
-    }
+   if (cmd === 'huongdan') {
+  const lenh = interaction.options.getString('lenh') ?? 'bypass';
+
+  if (lenh === 'bypass') {
+    const e = new EmbedBuilder()
+      .setTitle('📖 Hướng dẫn sử dụng lệnh /bypass')
+      .setColor(COLORS.info)
+      .setDescription(
+        '### 📌 Các bước thực hiện\n\n' +
+        '**Bước 1️⃣** — Vào thanh chat, gõ lệnh `/bypass`\n\n' +
+        '**Bước 2️⃣** — Sau khi lệnh hiện ra như này:\n' +
+        '> `/bypass` `url` `|`\n\n' +
+        '**Bước 3️⃣** — Điền đường link cần bypass vào chỗ **url**\n\n' +
+        '**Bước 4️⃣** — Bấm **Enter** hoặc **Gửi**, rồi chờ khoảng **5–10 giây**\n\n' +
+        '**Bước 5️⃣** — Bot trả kết quả → **Copy và dán** vào là xong! ✅\n\n' +
+        '---\n' +
+        '### ⚠️ Lưu ý quan trọng\n' +
+        '> • Bot **không** bypass được các link dạng `link4...` và một số loại link đặc biệt khác\n' +
+        '> • Phải nhập **đúng đường dẫn** (khuyến khích có `https://`) thì bot mới xử lý được\n' +
+        '> • Nếu sau **10 giây** không có kết quả, hãy kiểm tra lại link và thử lại'
+      )
+      .setFooter({ text: 'Chúc bạn bypass thành công! 🎉' })
+      .setTimestamp();
+    return interaction.reply({ embeds: [e] });
+  }
+
+  // fallback nếu thêm lệnh khác sau này
+  return interaction.reply({ embeds: [errorEmbed('Không tìm thấy', `Chưa có hướng dẫn cho lệnh **${lenh}**`)] });
+}
 
     // ════════════════════════════════════════════════════════
     //  AI COMMANDS
