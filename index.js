@@ -1,5 +1,5 @@
 // ============================================================
-//  DISCORD BOT FULL FEATURED - 87+ CHỨC NĂNG
+//  DISCORD BOT FULL FEATURED - 100+ CHỨC NĂNG
 //  Gộp chung 1 file duy nhất - Deploy ngay lên Railway
 // ============================================================
 
