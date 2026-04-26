@@ -416,9 +416,9 @@ function canManageChannelGame(interaction, hostId) {
   return interaction.user.id === hostId || interaction.memberPermissions?.has(PermissionFlagsBits.ManageMessages);
 }
 
-const xoGames = new Map(); // channelId -> { players, board, turn, winner, createdAt, messageId }
-const noiTuGames = new Map(); // channelId -> { currentWord, used, scores, hostId }
-const vuaTiengVietGames = new Map(); // channelId -> { answer, scrambledLetters, category, timeout, endsAt, hostId }
+const xoGames = new Map();
+const noiTuGames = new Map();
+const vuaTiengVietGames = new Map();
 const noiTuValidationCache = new Map();
 
 const XO_WIN_LINES = [
@@ -614,15 +614,18 @@ const client = new Client({
   ]
 });
 
-const musicQueues = new Map(); // guildId -> { songs: [], loop: false, current: 0 }
+const musicQueues = new Map();
 
 // ══════════════════════════════════════════════════════════
-//  SLASH COMMANDS DEFINITION (84+ LỆNH)
+//  SLASH COMMANDS DEFINITION
 // ══════════════════════════════════════════════════════════
 const commands = [
   // ── MENU ──
   new SlashCommandBuilder().setName('menu').setDescription('📋 Xem toàn bộ lệnh'),
   new SlashCommandBuilder().setName('help').setDescription('❓ Hướng dẫn sử dụng bot'),
+
+  // ── HƯỚNG DẪN (1 lệnh mới) ──
+  new SlashCommandBuilder().setName('huongdan').setDescription('📖 Hướng dẫn sử dụng lệnh /bypass'),
 
   // ── AI (11 lệnh) ──
   new SlashCommandBuilder().setName('ask').setDescription('🤖 Hỏi Groq AI')
@@ -672,7 +675,7 @@ const commands = [
     .addStringOption(o => o.setName('to').setDescription('Sang').setRequired(true))
     .addNumberOption(o => o.setName('amount').setDescription('Số tiền').setRequired(false)),
 
-  // ── MOD (17 lệnh — bao gồm 4 lệnh purge mới) ──
+  // ── MOD (17 lệnh) ──
   new SlashCommandBuilder().setName('kick').setDescription('👢 Kick thành viên')
     .addUserOption(o => o.setName('user').setDescription('Thành viên').setRequired(true))
     .addStringOption(o => o.setName('reason').setDescription('Lý do').setRequired(false))
@@ -701,8 +704,6 @@ const commands = [
   new SlashCommandBuilder().setName('clearwarns').setDescription('🗑️ Xóa cảnh cáo')
     .addUserOption(o => o.setName('user').setDescription('Thành viên').setRequired(true))
     .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers),
-
-  // PURGE - xóa chat (4 lệnh mới + 1 nâng cấp)
   new SlashCommandBuilder().setName('purge').setDescription('🗑️ Xóa tin nhắn hàng loạt')
     .addIntegerOption(o => o.setName('amount').setDescription('Số lượng 1-100').setMinValue(1).setMaxValue(100).setRequired(true))
     .addUserOption(o => o.setName('user').setDescription('Chỉ xóa của user này').setRequired(false))
@@ -720,7 +721,6 @@ const commands = [
     .addStringOption(o => o.setName('keyword').setDescription('Từ khóa cần xóa').setRequired(true))
     .addIntegerOption(o => o.setName('amount').setDescription('Số lượng cần quét (1-100)').setMinValue(1).setMaxValue(100).setRequired(false))
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages),
-
   new SlashCommandBuilder().setName('slowmode').setDescription('⏱️ Slowmode')
     .addIntegerOption(o => o.setName('seconds').setDescription('Giây 0-21600').setMinValue(0).setMaxValue(21600).setRequired(true))
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageChannels),
@@ -870,7 +870,7 @@ client.once('ready', async () => {
 });
 
 // ══════════════════════════════════════════════════════════
-//  INTERACTION HANDLER (XỬ LÝ LỆNH)
+//  INTERACTION HANDLER
 // ══════════════════════════════════════════════════════════
 client.on('interactionCreate', async interaction => {
   if (interaction.isButton() && interaction.customId.startsWith('xo:')) {
@@ -926,9 +926,10 @@ client.on('interactionCreate', async interaction => {
           { name: '🎮 Fun (16)', value: '`/coinflip` `/roll` `/8ball` `/joke` `/meme` `/lovecalc` `/rps` `/slap` `/hug` `/kiss` `/pat` `/trivia` `/dadjoke` `/quote` `/fact` `/tiktok`' },
           { name: '🕹️ Game (5)', value: '`/xo` `/nt` `/vtv` `/noitu` `/vuatiengviet`' },
           { name: '🔧 Utility (12)', value: '`/poll` `/remind` `/afk` `/timer` `/say` `/embed` `/announce` `/choose` `/reverse` `/base64` `/qrcode` `/shorturl`' },
-          { name: '📊 Level/XP (5)', value: '`/rank` `/leaderboard` `/checkin` `/profile` `/badges`' }
+          { name: '📊 Level/XP (5)', value: '`/rank` `/leaderboard` `/checkin` `/profile` `/badges`' },
+          { name: '📖 Hướng dẫn (1)', value: '`/huongdan` — Hướng dẫn sử dụng lệnh `/bypass`' }
         )
-        .setFooter({ text: `Tổng ${commands.length} lệnh | Game nhanh và tra IP đã được rút gọn` })
+        .setFooter({ text: `Tổng ${commands.length} lệnh | Dùng /huongdan để xem hướng dẫn bypass` })
         .setTimestamp();
       return interaction.reply({ embeds: [e] });
     }
@@ -939,6 +940,32 @@ client.on('interactionCreate', async interaction => {
     if (cmd === 'ping') {
       const latency = Date.now() - interaction.createdTimestamp;
       return interaction.reply({ embeds: [embed('🏓 Pong!', `⏱️ ${latency}ms | 💓 ${client.ws.ping}ms`, COLORS.success)] });
+    }
+
+    // ════════════════════════════════════════════════════════
+    //  HƯỚNG DẪN BYPASS  ← LỆNH MỚI THÊM VÀO
+    // ════════════════════════════════════════════════════════
+    if (cmd === 'huongdan') {
+      const e = new EmbedBuilder()
+        .setTitle('📖 Hướng dẫn sử dụng lệnh /bypass')
+        .setColor(COLORS.info)
+        .setDescription(
+          '### 📌 Các bước thực hiện\n\n' +
+          '**Bước 1️⃣** — Vào thanh chat, gõ lệnh `/bypass`\n\n' +
+          '**Bước 2️⃣** — Sau khi lệnh hiện ra như này:\n' +
+          '> `/bypass` `url` `|`\n\n' +
+          '**Bước 3️⃣** — Điền đường link cần bypass vào chỗ **url**\n\n' +
+          '**Bước 4️⃣** — Bấm **Enter** hoặc **Gửi**, rồi chờ khoảng **5–10 giây**\n\n' +
+          '**Bước 5️⃣** — Bot trả kết quả → **Copy và dán** vào là xong! ✅\n\n' +
+          '---\n' +
+          '### ⚠️ Lưu ý quan trọng\n' +
+          '> • Bot **không** bypass được các link dạng `link4...` và một số loại link đặc biệt khác\n' +
+          '> • Phải nhập **đúng đường dẫn** (khuyến khích có `https://`) thì bot mới xử lý được\n' +
+          '> • Nếu sau **10 giây** không có kết quả, hãy kiểm tra lại link và thử lại'
+        )
+        .setFooter({ text: 'Chúc bạn bypass thành công! 🎉' })
+        .setTimestamp();
+      return interaction.reply({ embeds: [e] });
     }
 
     // ════════════════════════════════════════════════════════
@@ -1244,10 +1271,8 @@ client.on('interactionCreate', async interaction => {
     }
 
     // ════════════════════════════════════════════════════════
-    //  PURGE COMMANDS - XÓA CHAT
+    //  PURGE COMMANDS
     // ════════════════════════════════════════════════════════
-
-    // Helper: giới hạn tin nhắn Discord bulkDelete (phải dưới 14 ngày)
     const FOURTEEN_DAYS = 14 * 24 * 60 * 60 * 1000;
 
     if (cmd === 'purge') {
@@ -1256,11 +1281,8 @@ client.on('interactionCreate', async interaction => {
       await interaction.deferReply({ ephemeral: true });
 
       let messages = await interaction.channel.messages.fetch({ limit: 100 });
-
-      // Lọc theo user nếu có
       if (user) messages = messages.filter(m => m.author.id === user.id);
 
-      // Kiểm tra tin quá 14 ngày
       const tooOld = [...messages.values()].filter(m => Date.now() - m.createdTimestamp >= FOURTEEN_DAYS);
       messages = messages.filter(m => Date.now() - m.createdTimestamp < FOURTEEN_DAYS);
       messages = [...messages.values()].slice(0, amount);
@@ -1285,7 +1307,6 @@ client.on('interactionCreate', async interaction => {
       });
     }
 
-    // ─── PURGE BOT ─────────────────────────────────────────
     if (cmd === 'purgebot') {
       const amount = interaction.options.getInteger('amount');
       await interaction.deferReply({ ephemeral: true });
@@ -1309,7 +1330,6 @@ client.on('interactionCreate', async interaction => {
       });
     }
 
-    // ─── PURGE LINKS ───────────────────────────────────────
     if (cmd === 'purgelinks') {
       const amount = interaction.options.getInteger('amount');
       await interaction.deferReply({ ephemeral: true });
@@ -1334,7 +1354,6 @@ client.on('interactionCreate', async interaction => {
       });
     }
 
-    // ─── PURGE IMAGES ──────────────────────────────────────
     if (cmd === 'purgeimages') {
       const amount = interaction.options.getInteger('amount');
       await interaction.deferReply({ ephemeral: true });
@@ -1361,7 +1380,6 @@ client.on('interactionCreate', async interaction => {
       });
     }
 
-    // ─── PURGE WORD ────────────────────────────────────────
     if (cmd === 'purgeword') {
       const keyword = interaction.options.getString('keyword').toLowerCase();
       const amount = interaction.options.getInteger('amount') ?? 50;
@@ -1501,20 +1519,12 @@ client.on('interactionCreate', async interaction => {
     if (cmd === '8ball') {
       const q = interaction.options.getString('question');
       const answers = [
-        'Chắc chắn rồi! 🎯',
-        'Có thể lắm đó! 😊',
-        'Theo dự đoán của tôi là CÓ! ✅',
-        'Khả năng rất cao! 📈',
-        'Không nghi ngờ gì nữa! 💯',
-        'Nhìn không khả quan lắm... 😬',
-        'Câu trả lời rất mờ nhạt, hỏi lại sau đi! 🌫️',
-        'Tốt hơn là đừng nên kỳ vọng! 😅',
-        'Không có gì chắc chắn cả! 🤷',
-        'Câu trả lời là KHÔNG! ❌',
-        'Đừng mơ nhé bạn ơi! 😂',
-        'Tuyệt đối không! 🚫',
-        'Hỏi tôi sau khi bạn cúng ông địa đã! 🕯️',
-        'Vũ trụ nói rằng... Có lẽ không! 🌌',
+        'Chắc chắn rồi! 🎯', 'Có thể lắm đó! 😊', 'Theo dự đoán của tôi là CÓ! ✅',
+        'Khả năng rất cao! 📈', 'Không nghi ngờ gì nữa! 💯',
+        'Nhìn không khả quan lắm... 😬', 'Câu trả lời rất mờ nhạt, hỏi lại sau đi! 🌫️',
+        'Tốt hơn là đừng nên kỳ vọng! 😅', 'Không có gì chắc chắn cả! 🤷',
+        'Câu trả lời là KHÔNG! ❌', 'Đừng mơ nhé bạn ơi! 😂', 'Tuyệt đối không! 🚫',
+        'Hỏi tôi sau khi bạn cúng ông địa đã! 🕯️', 'Vũ trụ nói rằng... Có lẽ không! 🌌',
         'Bạn biết câu trả lời rồi đấy, cần tôi xác nhận không? 😏',
       ];
       return interaction.reply({ embeds: [embed('🔮 Quả cầu thần', `**❓ ${q}**\n\n**💬 ${randomFrom(answers)}**`, COLORS.primary)] });
@@ -1673,7 +1683,7 @@ client.on('interactionCreate', async interaction => {
     }
 
     // ════════════════════════════════════════════════════════
-    //  UTILITY COMMANDS
+    //  GAME COMMANDS
     // ════════════════════════════════════════════════════════
     if (cmd === 'xo') {
       const target = interaction.options.getUser('user');
@@ -1682,7 +1692,7 @@ client.on('interactionCreate', async interaction => {
 
       const activeGame = xoGames.get(interaction.channelId);
       if (activeGame && Date.now() - activeGame.createdAt < 15 * 60 * 1000) {
-        return interaction.reply({ embeds: [errorEmbed('Đang có trận đấu', 'Channel này đang có một ván X O chưa kết thúc.')] , ephemeral: true });
+        return interaction.reply({ embeds: [errorEmbed('Đang có trận đấu', 'Channel này đang có một ván X O chưa kết thúc.')], ephemeral: true });
       }
       if (activeGame) xoGames.delete(interaction.channelId);
 
@@ -1710,16 +1720,16 @@ client.on('interactionCreate', async interaction => {
 
       if (action === 'start') {
         if (noiTuGames.has(interaction.channelId)) {
-          return interaction.reply({ embeds: [errorEmbed('Đang chạy', 'Channel này đã có một game Nối từ rồi.')] , ephemeral: true });
+          return interaction.reply({ embeds: [errorEmbed('Đang chạy', 'Channel này đã có một game Nối từ rồi.')], ephemeral: true });
         }
         if (vuaTiengVietGames.has(interaction.channelId)) {
-          return interaction.reply({ embeds: [errorEmbed('Bận channel', 'Channel này đang có game Vua tiếng Việt. Hãy dừng game đó trước.')] , ephemeral: true });
+          return interaction.reply({ embeds: [errorEmbed('Bận channel', 'Channel này đang có game Vua tiếng Việt. Hãy dừng game đó trước.')], ephemeral: true });
         }
 
         const rawWord = interaction.options.getString('word') ?? randomFrom(NOI_TU_WORD_BANK);
         const startWord = normalizeGameText(rawWord);
         if (!isCompoundWord(startWord)) {
-          return interaction.reply({ embeds: [errorEmbed('Lỗi', 'Từ bắt đầu phải có ít nhất 2 tiếng.')] , ephemeral: true });
+          return interaction.reply({ embeds: [errorEmbed('Lỗi', 'Từ bắt đầu phải có ít nhất 2 tiếng.')], ephemeral: true });
         }
 
         const game = {
@@ -1738,7 +1748,7 @@ client.on('interactionCreate', async interaction => {
 
       const game = noiTuGames.get(interaction.channelId);
       if (!game) {
-        return interaction.reply({ embeds: [errorEmbed('Không có game', 'Channel này chưa có game Nối từ nào đang chạy.')] , ephemeral: true });
+        return interaction.reply({ embeds: [errorEmbed('Không có game', 'Channel này chưa có game Nối từ nào đang chạy.')], ephemeral: true });
       }
 
       if (action === 'status') {
@@ -1746,7 +1756,7 @@ client.on('interactionCreate', async interaction => {
       }
 
       if (!canManageChannelGame(interaction, game.hostId)) {
-        return interaction.reply({ embeds: [errorEmbed('Không đủ quyền', 'Chỉ người tạo game hoặc mod mới có thể dừng game này.')] , ephemeral: true });
+        return interaction.reply({ embeds: [errorEmbed('Không đủ quyền', 'Chỉ người tạo game hoặc mod mới có thể dừng game này.')], ephemeral: true });
       }
 
       noiTuGames.delete(interaction.channelId);
@@ -1760,10 +1770,10 @@ client.on('interactionCreate', async interaction => {
 
       if (action === 'start') {
         if (vuaTiengVietGames.has(interaction.channelId)) {
-          return interaction.reply({ embeds: [errorEmbed('Đang chạy', 'Channel này đã có một game Vua tiếng Việt rồi.')] , ephemeral: true });
+          return interaction.reply({ embeds: [errorEmbed('Đang chạy', 'Channel này đã có một game Vua tiếng Việt rồi.')], ephemeral: true });
         }
         if (noiTuGames.has(interaction.channelId)) {
-          return interaction.reply({ embeds: [errorEmbed('Bận channel', 'Channel này đang có game Nối từ. Hãy dừng game đó trước.')] , ephemeral: true });
+          return interaction.reply({ embeds: [errorEmbed('Bận channel', 'Channel này đang có game Nối từ. Hãy dừng game đó trước.')], ephemeral: true });
         }
 
         const difficulty = interaction.options.getString('difficulty') ?? 'medium';
@@ -1800,7 +1810,7 @@ client.on('interactionCreate', async interaction => {
 
       const game = vuaTiengVietGames.get(interaction.channelId);
       if (!game) {
-        return interaction.reply({ embeds: [errorEmbed('Không có game', 'Channel này chưa có game Vua tiếng Việt nào đang chạy.')] , ephemeral: true });
+        return interaction.reply({ embeds: [errorEmbed('Không có game', 'Channel này chưa có game Vua tiếng Việt nào đang chạy.')], ephemeral: true });
       }
 
       if (action === 'status') {
@@ -1808,7 +1818,7 @@ client.on('interactionCreate', async interaction => {
       }
 
       if (!canManageChannelGame(interaction, game.hostId)) {
-        return interaction.reply({ embeds: [errorEmbed('Không đủ quyền', 'Chỉ người tạo game hoặc mod mới có thể dừng game này.')] , ephemeral: true });
+        return interaction.reply({ embeds: [errorEmbed('Không đủ quyền', 'Chỉ người tạo game hoặc mod mới có thể dừng game này.')], ephemeral: true });
       }
 
       clearTimeout(game.timeout);
@@ -1818,6 +1828,9 @@ client.on('interactionCreate', async interaction => {
       return interaction.reply({ embeds: [e] });
     }
 
+    // ════════════════════════════════════════════════════════
+    //  UTILITY COMMANDS
+    // ════════════════════════════════════════════════════════
     if (cmd === 'poll') {
       const q = interaction.options.getString('question');
       const opts = [
@@ -1990,7 +2003,7 @@ client.on('messageCreate', async message => {
   // XP cooldown: 60s
   const user = getXP(message.guildId, message.author.id);
   if (Date.now() - user.lastMsg >= 60000) {
-    const xpGain = Math.floor(Math.random() * 10) + 5; // 5-15 XP
+    const xpGain = Math.floor(Math.random() * 10) + 5;
     const result = addXP(message.guildId, message.author.id, xpGain);
 
     if (result.leveledUp) {
